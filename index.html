@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="toolbar">
+            <div class="toolbar-section">
+                <input type="file" id="fileInput" accept=".svg" style="display: none;">
+                <button id="openBtn" class="btn">Open SVG</button>
+                <button id="saveBtn" class="btn">Save SVG</button>
+            </div>
+            <div class="toolbar-section">
+                <button id="selectTool" class="btn tool-btn active" data-tool="select">Select</button>
+                <button id="directSelectTool" class="btn tool-btn" data-tool="direct-select">Direct Select</button>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <aside class="layers-panel">
+                <h3>Layers</h3>
+                <div id="layersList" class="layers-list">
+                    <p class="empty-message">Open an SVG file to see layers</p>
+                </div>
+            </aside>
+            
+            <main class="canvas-container">
+                <div id="svgContainer" class="svg-container">
+                    <div class="empty-state">
+                        <p>Open an SVG file to start editing</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
+
+
