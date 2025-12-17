@@ -1090,8 +1090,9 @@ class SVGEditor {
 }
 
 // Initialize the editor when the page loads
+var activeEditor;
 document.addEventListener('DOMContentLoaded', () => {
-    new SVGEditor();
+    activeEditor =new SVGEditor();
     console.log("v1");
 });
 
