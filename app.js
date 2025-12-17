@@ -11,6 +11,7 @@ class SVGEditor {
         this.nodeHandles = [];
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
+        this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
         
         this.init();
     }
@@ -171,6 +172,8 @@ class SVGEditor {
         // Use event delegation on the SVG element itself
         this.svgElement.addEventListener('mousedown', (e) => {
             const target = e.target;
+            
+            // First check for direct hit
             if (target && target !== this.svgElement && 
                 (target.tagName === 'path' || target.tagName === 'circle' || 
                  target.tagName === 'rect' || target.tagName === 'ellipse' || 
@@ -178,6 +181,31 @@ class SVGEditor {
                  target.tagName === 'polygon')) {
                 e.stopPropagation();
                 this.handleMouseDown(e, target);
+            } else {
+                // No direct hit - check for proximity to thin elements (paths, lines, etc.)
+                // First get elements at the click point to respect z-order
+                const elementsAtPoint = document.elementsFromPoint(e.clientX, e.clientY);
+                const thinElementsAtPoint = elementsAtPoint.filter(el => 
+                    el !== this.svgElement && 
+                    (el.tagName === 'path' || el.tagName === 'line' || 
+                     el.tagName === 'polyline' || el.tagName === 'polygon')
+                );
+                
+                // Check elements at the point first (respects z-order)
+                let nearestElement = null;
+                if (thinElementsAtPoint.length > 0) {
+                    nearestElement = this.findNearestThinElementAtPoint(thinElementsAtPoint, e.clientX, e.clientY);
+                }
+                
+                // If no element found at point, check all thin elements
+                if (!nearestElement) {
+                    nearestElement = this.findNearestThinElement(e.clientX, e.clientY);
+                }
+                
+                if (nearestElement) {
+                    e.stopPropagation();
+                    this.handleMouseDown(e, nearestElement);
+                }
             }
         });
         
@@ -223,13 +251,20 @@ class SVGEditor {
             
             this.isDragging = true;
             this.currentDraggedElement = element;
-            const rect = this.svgElement.getBoundingClientRect();
+            
+            // Convert initial mouse position to SVG coordinates
+            const point = this.svgElement.createSVGPoint();
+            point.x = e.clientX;
+            point.y = e.clientY;
+            const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+            
+            // Store initial click position in SVG coordinates
             this.dragStart = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
+                x: svgPoint.x,
+                y: svgPoint.y
             };
             
-            // Get current transform
+            // Store initial element translate transform
             const transform = this.getElementTransform(element);
             this.dragOffset = {
                 x: transform.x,
@@ -255,13 +290,17 @@ class SVGEditor {
                 this.wasDragging = true;
             }
             
-            const rect = this.svgElement.getBoundingClientRect();
-            const currentX = e.clientX - rect.left;
-            const currentY = e.clientY - rect.top;
+            // Convert current mouse position to SVG coordinates
+            const point = this.svgElement.createSVGPoint();
+            point.x = e.clientX;
+            point.y = e.clientY;
+            const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
             
-            const deltaX = currentX - this.dragStart.x;
-            const deltaY = currentY - this.dragStart.y;
+            // Calculate delta from initial click position
+            const deltaX = svgPoint.x - this.dragStart.x;
+            const deltaY = svgPoint.y - this.dragStart.y;
             
+            // Apply delta to initial transform
             this.moveElement(this.currentDraggedElement, 
                 this.dragOffset.x + deltaX, 
                 this.dragOffset.y + deltaY);
@@ -490,6 +529,322 @@ class SVGEditor {
             }
         });
         this.nodeHandles = [];
+    }
+    
+    findNearestThinElementAtPoint(elements, screenX, screenY) {
+        let nearestElement = null;
+        let minDistance = this.proximityThreshold;
+        
+        // Check elements in order (top to bottom, respecting z-order)
+        for (const element of elements) {
+            if (element.style.display === 'none') continue;
+            
+            const distance = this.getDistanceToElementScreen(element, screenX, screenY);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestElement = element;
+            }
+        }
+        
+        return nearestElement;
+    }
+    
+    findNearestThinElement(screenX, screenY) {
+        if (!this.svgElement) return null;
+        
+        // Check paths, lines, polylines, and polygons (thin elements that are hard to click)
+        // Check in reverse order so elements that appear later (on top) are checked first
+        const thinElements = Array.from(this.svgElement.querySelectorAll('path, line, polyline, polygon')).reverse();
+        let nearestElement = null;
+        let minDistance = this.proximityThreshold;
+        
+        thinElements.forEach(element => {
+            // Skip if element is not visible
+            if (element.style.display === 'none') return;
+            
+            const distance = this.getDistanceToElementScreen(element, screenX, screenY);
+            if (distance < minDistance) {
+                minDistance = distance;
+                nearestElement = element;
+            }
+        });
+        
+        return nearestElement;
+    }
+    
+    getDistanceToElement(element, point) {
+        if (element.tagName === 'path') {
+            return this.getDistanceToPath(element, point);
+        } else if (element.tagName === 'line') {
+            return this.getDistanceToLine(element, point);
+        } else if (element.tagName === 'polyline' || element.tagName === 'polygon') {
+            return this.getDistanceToPolyline(element, point);
+        }
+        return Infinity;
+    }
+    
+    getDistanceToElementScreen(element, screenX, screenY) {
+        // Convert screen coordinates to SVG coordinates for the point
+        const point = this.svgElement.createSVGPoint();
+        point.x = screenX;
+        point.y = screenY;
+        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+        
+        if (element.tagName === 'path') {
+            return this.getDistanceToPathScreen(element, svgPoint, screenX, screenY);
+        } else if (element.tagName === 'line') {
+            return this.getDistanceToLineScreen(element, svgPoint, screenX, screenY);
+        } else if (element.tagName === 'polyline' || element.tagName === 'polygon') {
+            return this.getDistanceToPolylineScreen(element, svgPoint, screenX, screenY);
+        }
+        return Infinity;
+    }
+    
+    getDistanceToPath(path, point) {
+        // First check if point is directly on the path
+        // Note: isPointInStroke uses local coordinates, so we need to transform the point
+        if (path.isPointInStroke) {
+            const pathCTM = path.getCTM();
+            if (pathCTM) {
+                const localPoint = this.svgElement.createSVGPoint();
+                localPoint.x = point.x;
+                localPoint.y = point.y;
+                const localPointTransformed = localPoint.matrixTransform(pathCTM.inverse());
+                if (path.isPointInStroke(localPointTransformed)) {
+                    return 0;
+                }
+            }
+        }
+        
+        // Calculate distance to the path
+        return this.calculateDistanceToPath(path, point);
+    }
+    
+    calculateDistanceToPath(path, point) {
+        // Sample points along the path and find minimum distance
+        const pathLength = path.getTotalLength();
+        if (pathLength === 0) return Infinity;
+        
+        // Get the path's transform matrix to convert local coordinates to SVG coordinates
+        const pathCTM = path.getCTM();
+        if (!pathCTM) return Infinity;
+        
+        let minDistance = Infinity;
+        const samples = Math.max(50, Math.floor(pathLength / 2)); // Sample every 2 pixels or at least 50 points
+        
+        for (let i = 0; i <= samples; i++) {
+            const len = (pathLength * i) / samples;
+            const pathPointLocal = path.getPointAtLength(len);
+            
+            // Transform path point from local coordinates to SVG coordinates
+            const pathPointSVG = this.svgElement.createSVGPoint();
+            pathPointSVG.x = pathPointLocal.x;
+            pathPointSVG.y = pathPointLocal.y;
+            const pathPoint = pathPointSVG.matrixTransform(pathCTM);
+            
+            const dx = pathPoint.x - point.x;
+            const dy = pathPoint.y - point.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
+    }
+    
+    getDistanceToPathScreen(path, svgPoint, screenX, screenY) {
+        // Sample points along the path and find minimum distance in screen coordinates
+        const pathLength = path.getTotalLength();
+        if (pathLength === 0) return Infinity;
+        
+        let minDistance = Infinity;
+        const samples = Math.max(50, Math.floor(pathLength / 2));
+        
+        for (let i = 0; i <= samples; i++) {
+            const len = (pathLength * i) / samples;
+            const pathPointLocal = path.getPointAtLength(len);
+            
+            // Transform path point to screen coordinates
+            const pathPointSVG = this.svgElement.createSVGPoint();
+            pathPointSVG.x = pathPointLocal.x;
+            pathPointSVG.y = pathPointLocal.y;
+            const pathPointScreen = pathPointSVG.matrixTransform(path.getScreenCTM());
+            
+            const dx = pathPointScreen.x - screenX;
+            const dy = pathPointScreen.y - screenY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
+    }
+    
+    getDistanceToLine(line, point) {
+        const x1 = parseFloat(line.getAttribute('x1')) || 0;
+        const y1 = parseFloat(line.getAttribute('y1')) || 0;
+        const x2 = parseFloat(line.getAttribute('x2')) || 0;
+        const y2 = parseFloat(line.getAttribute('y2')) || 0;
+        
+        // Transform line endpoints from local coordinates to SVG coordinates
+        const lineCTM = line.getCTM();
+        if (!lineCTM) return Infinity;
+        
+        const p1 = this.svgElement.createSVGPoint();
+        p1.x = x1;
+        p1.y = y1;
+        const p1SVG = p1.matrixTransform(lineCTM);
+        
+        const p2 = this.svgElement.createSVGPoint();
+        p2.x = x2;
+        p2.y = y2;
+        const p2SVG = p2.matrixTransform(lineCTM);
+        
+        return this.distanceToLineSegment(point.x, point.y, p1SVG.x, p1SVG.y, p2SVG.x, p2SVG.y);
+    }
+    
+    getDistanceToLineScreen(line, svgPoint, screenX, screenY) {
+        const x1 = parseFloat(line.getAttribute('x1')) || 0;
+        const y1 = parseFloat(line.getAttribute('y1')) || 0;
+        const x2 = parseFloat(line.getAttribute('x2')) || 0;
+        const y2 = parseFloat(line.getAttribute('y2')) || 0;
+        
+        // Transform line endpoints to screen coordinates
+        const p1 = this.svgElement.createSVGPoint();
+        p1.x = x1;
+        p1.y = y1;
+        const p1Screen = p1.matrixTransform(line.getScreenCTM());
+        
+        const p2 = this.svgElement.createSVGPoint();
+        p2.x = x2;
+        p2.y = y2;
+        const p2Screen = p2.matrixTransform(line.getScreenCTM());
+        
+        return this.distanceToLineSegment(screenX, screenY, p1Screen.x, p1Screen.y, p2Screen.x, p2Screen.y);
+    }
+    
+    getDistanceToPolyline(polyline, point) {
+        const pointsAttr = polyline.getAttribute('points');
+        if (!pointsAttr) return Infinity;
+        
+        const points = pointsAttr.trim().split(/[\s,]+/).map(parseFloat);
+        let minDistance = Infinity;
+        
+        // Transform polyline points from local coordinates to SVG coordinates
+        const polylineCTM = polyline.getCTM();
+        if (!polylineCTM) return Infinity;
+        
+        for (let i = 0; i < points.length - 2; i += 2) {
+            const p1 = this.svgElement.createSVGPoint();
+            p1.x = points[i];
+            p1.y = points[i + 1];
+            const p1SVG = p1.matrixTransform(polylineCTM);
+            
+            const p2 = this.svgElement.createSVGPoint();
+            p2.x = points[i + 2];
+            p2.y = points[i + 3];
+            const p2SVG = p2.matrixTransform(polylineCTM);
+            
+            const distance = this.distanceToLineSegment(point.x, point.y, p1SVG.x, p1SVG.y, p2SVG.x, p2SVG.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        // For polygons, also check the closing segment
+        if (polyline.tagName === 'polygon' && points.length >= 4) {
+            const p1 = this.svgElement.createSVGPoint();
+            p1.x = points[points.length - 2];
+            p1.y = points[points.length - 1];
+            const p1SVG = p1.matrixTransform(polylineCTM);
+            
+            const p2 = this.svgElement.createSVGPoint();
+            p2.x = points[0];
+            p2.y = points[1];
+            const p2SVG = p2.matrixTransform(polylineCTM);
+            
+            const distance = this.distanceToLineSegment(point.x, point.y, p1SVG.x, p1SVG.y, p2SVG.x, p2SVG.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
+    }
+    
+    getDistanceToPolylineScreen(polyline, svgPoint, screenX, screenY) {
+        const pointsAttr = polyline.getAttribute('points');
+        if (!pointsAttr) return Infinity;
+        
+        const points = pointsAttr.trim().split(/[\s,]+/).map(parseFloat);
+        let minDistance = Infinity;
+        
+        // Transform polyline points to screen coordinates
+        const polylineScreenCTM = polyline.getScreenCTM();
+        if (!polylineScreenCTM) return Infinity;
+        
+        for (let i = 0; i < points.length - 2; i += 2) {
+            const p1 = this.svgElement.createSVGPoint();
+            p1.x = points[i];
+            p1.y = points[i + 1];
+            const p1Screen = p1.matrixTransform(polylineScreenCTM);
+            
+            const p2 = this.svgElement.createSVGPoint();
+            p2.x = points[i + 2];
+            p2.y = points[i + 3];
+            const p2Screen = p2.matrixTransform(polylineScreenCTM);
+            
+            const distance = this.distanceToLineSegment(screenX, screenY, p1Screen.x, p1Screen.y, p2Screen.x, p2Screen.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        // For polygons, also check the closing segment
+        if (polyline.tagName === 'polygon' && points.length >= 4) {
+            const p1 = this.svgElement.createSVGPoint();
+            p1.x = points[points.length - 2];
+            p1.y = points[points.length - 1];
+            const p1Screen = p1.matrixTransform(polylineScreenCTM);
+            
+            const p2 = this.svgElement.createSVGPoint();
+            p2.x = points[0];
+            p2.y = points[1];
+            const p2Screen = p2.matrixTransform(polylineScreenCTM);
+            
+            const distance = this.distanceToLineSegment(screenX, screenY, p1Screen.x, p1Screen.y, p2Screen.x, p2Screen.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
+    }
+    
+    distanceToLineSegment(px, py, x1, y1, x2, y2) {
+        // Calculate distance from point to line segment
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lengthSquared = dx * dx + dy * dy;
+        
+        if (lengthSquared === 0) {
+            // Line segment is a point
+            const dx2 = px - x1;
+            const dy2 = py - y1;
+            return Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        }
+        
+        const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+        const projX = x1 + t * dx;
+        const projY = y1 + t * dy;
+        
+        const dx2 = px - projX;
+        const dy2 = py - projY;
+        return Math.sqrt(dx2 * dx2 + dy2 * dy2);
     }
     
     parsePathData(pathData) {
