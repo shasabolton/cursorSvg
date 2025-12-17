@@ -12,6 +12,7 @@ class SVGEditor {
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
         this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
+        this.proximitySelectedElement = null; // Track element selected via proximity
         
         this.init();
     }
@@ -180,6 +181,8 @@ class SVGEditor {
                  target.tagName === 'line' || target.tagName === 'polyline' || 
                  target.tagName === 'polygon')) {
                 e.stopPropagation();
+                // Clear proximity tracking since we have a direct hit
+                this.proximitySelectedElement = null;
                 this.handleMouseDown(e, target);
             } else {
                 // No direct hit - check for proximity to thin elements (paths, lines, etc.)
@@ -204,6 +207,8 @@ class SVGEditor {
                 
                 if (nearestElement) {
                     e.stopPropagation();
+                    // Track that this element was selected via proximity
+                    this.proximitySelectedElement = nearestElement;
                     this.handleMouseDown(e, nearestElement);
                 }
             }
@@ -221,9 +226,18 @@ class SVGEditor {
                     // Selection already happened in mousedown, just update UI
                     this.renderLayersPanel();
                 }
+                // Clear proximity tracking since we have a direct hit
+                this.proximitySelectedElement = null;
             } else if (target === this.svgElement && !e.ctrlKey && !e.metaKey) {
-                this.clearSelection();
-                this.renderLayersPanel();
+                // Don't clear selection if we just selected an element via proximity
+                if (!this.proximitySelectedElement) {
+                    this.clearSelection();
+                    this.renderLayersPanel();
+                } else {
+                    // Element was selected via proximity, just update UI and clear tracking
+                    this.renderLayersPanel();
+                    this.proximitySelectedElement = null;
+                }
             }
         });
         
@@ -325,10 +339,16 @@ class SVGEditor {
             this.isDragging = false;
             if (this.currentDraggedElement) {
                 this.currentDraggedElement.classList.remove('dragging');
+                // Ensure the element remains selected after drag
+                if (this.proximitySelectedElement === this.currentDraggedElement) {
+                    this.selectElement(this.currentDraggedElement, false);
+                }
                 this.currentDraggedElement = null;
             }
             this.currentDraggedNode = null;
             this.wasDragging = false;
+            // Update layers panel after drag completes
+            this.renderLayersPanel();
         }
     }
     
