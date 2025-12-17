@@ -1087,13 +1087,19 @@ class SVGEditor {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }
+
+    getSelectedPathSize(){
+        for (const path of this.selectedElements) {
+            console.log(path.getTotalLength());
+          }
+    }
 }
 
 // Initialize the editor when the page loads
 var activeEditor;
 document.addEventListener('DOMContentLoaded', () => {
     activeEditor =new SVGEditor();
-    console.log("v1");
+    console.log("v2");
 });
 
 
