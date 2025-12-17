@@ -415,7 +415,7 @@ class SVGEditor {
             return;
         }
         
-        // For paths, extract all points
+        // For paths, extract all points (in element-local coordinates)
         const pathData = element.getAttribute('d');
         if (!pathData) return;
         
@@ -424,11 +424,14 @@ class SVGEditor {
         
         commands.forEach((cmd, index) => {
             if (cmd.type === 'M' || cmd.type === 'L' || cmd.type === 'C' || cmd.type === 'Q') {
+                // Convert main point from element space to SVG space
+                const mainSvg = this.elementToSvgPoint(element, cmd.x, cmd.y);
+
                 // Create handle for main point
                 const handle = document.createElementNS(svgNS, 'circle');
-                handle.className = 'node-handle';
-                handle.setAttribute('cx', cmd.x);
-                handle.setAttribute('cy', cmd.y);
+                handle.setAttribute('class', 'node-handle');
+                handle.setAttribute('cx', mainSvg.x);
+                handle.setAttribute('cy', mainSvg.y);
                 handle.dataset.elementId = element.id;
                 handle.dataset.commandIndex = index;
                 handle.dataset.pointType = 'main';
@@ -449,10 +452,11 @@ class SVGEditor {
                 // For curves, show control points
                 if (cmd.type === 'C') {
                     // Control point 1
+                    const cp1Svg = this.elementToSvgPoint(element, cmd.x1, cmd.y1);
                     const cp1 = document.createElementNS(svgNS, 'circle');
-                    cp1.className = 'node-handle';
-                    cp1.setAttribute('cx', cmd.x1);
-                    cp1.setAttribute('cy', cmd.y1);
+                    cp1.setAttribute('class', 'node-handle');
+                    cp1.setAttribute('cx', cp1Svg.x);
+                    cp1.setAttribute('cy', cp1Svg.y);
                     cp1.dataset.elementId = element.id;
                     cp1.dataset.commandIndex = index;
                     cp1.dataset.pointType = 'control1';
@@ -473,10 +477,11 @@ class SVGEditor {
                     this.nodeHandles.push(cp1);
                     
                     // Control point 2
+                    const cp2Svg = this.elementToSvgPoint(element, cmd.x2, cmd.y2);
                     const cp2 = document.createElementNS(svgNS, 'circle');
-                    cp2.className = 'node-handle';
-                    cp2.setAttribute('cx', cmd.x2);
-                    cp2.setAttribute('cy', cmd.y2);
+                    cp2.setAttribute('class', 'node-handle');
+                    cp2.setAttribute('cx', cp2Svg.x);
+                    cp2.setAttribute('cy', cp2Svg.y);
                     cp2.dataset.elementId = element.id;
                     cp2.dataset.commandIndex = index;
                     cp2.dataset.pointType = 'control2';
@@ -504,7 +509,7 @@ class SVGEditor {
         const svgNS = 'http://www.w3.org/2000/svg';
         const bbox = element.getBBox();
         
-        // Show handles at corners
+        // Show handles at corners (convert from element space to SVG space)
         const corners = [
             { x: bbox.x, y: bbox.y },
             { x: bbox.x + bbox.width, y: bbox.y },
@@ -513,10 +518,12 @@ class SVGEditor {
         ];
         
         corners.forEach((corner, index) => {
+            const cornerSvg = this.elementToSvgPoint(element, corner.x, corner.y);
+
             const handle = document.createElementNS(svgNS, 'circle');
-            handle.className = 'node-handle';
-            handle.setAttribute('cx', corner.x);
-            handle.setAttribute('cy', corner.y);
+            handle.setAttribute('class', 'node-handle');
+            handle.setAttribute('cx', cornerSvg.x);
+            handle.setAttribute('cy', cornerSvg.y);
             handle.dataset.elementId = element.id;
             handle.dataset.cornerIndex = index;
             
@@ -525,10 +532,13 @@ class SVGEditor {
                 // For non-path elements, we'll move the entire element
                 this.isDragging = true;
                 this.currentDraggedElement = element;
-                const rect = this.svgElement.getBoundingClientRect();
+                const point = this.svgElement.createSVGPoint();
+                point.x = e.clientX;
+                point.y = e.clientY;
+                const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
                 this.dragStart = {
-                    x: e.clientX - rect.left,
-                    y: e.clientY - rect.top
+                    x: svgPoint.x,
+                    y: svgPoint.y
                 };
                 const transform = this.getElementTransform(element);
                 this.dragOffset = {
@@ -549,6 +559,27 @@ class SVGEditor {
             }
         });
         this.nodeHandles = [];
+    }
+
+    // Coordinate conversion helpers for node editing
+    svgToElementPoint(element, svgX, svgY) {
+        const point = this.svgElement.createSVGPoint();
+        point.x = svgX;
+        point.y = svgY;
+        const ctm = element.getCTM();
+        if (!ctm) return { x: svgX, y: svgY };
+        const local = point.matrixTransform(ctm.inverse());
+        return { x: local.x, y: local.y };
+    }
+
+    elementToSvgPoint(element, localX, localY) {
+        const point = this.svgElement.createSVGPoint();
+        point.x = localX;
+        point.y = localY;
+        const ctm = element.getCTM();
+        if (!ctm) return { x: localX, y: localY };
+        const svgPoint = point.matrixTransform(ctm);
+        return { x: svgPoint.x, y: svgPoint.y };
     }
     
     findNearestThinElementAtPoint(elements, screenX, screenY) {
@@ -871,51 +902,96 @@ class SVGEditor {
         const commands = [];
         const regex = /([MmLlHhVvCcSsQqTtAaZz])\s*([^MmLlHhVvCcSsQqTtAaZz]*)/g;
         let match;
-        
+
+        // Track current absolute position for converting relative commands
+        let currentX = 0;
+        let currentY = 0;
+
         while ((match = regex.exec(pathData)) !== null) {
             const type = match[1];
+            const isRelative = (type === type.toLowerCase());
             const coords = match[2].trim().split(/[\s,]+/).filter(s => s).map(parseFloat);
             
             if (type === 'M' || type === 'm') {
                 for (let i = 0; i < coords.length; i += 2) {
+                    let x = coords[i];
+                    let y = coords[i + 1];
+                    if (isRelative) {
+                        x += currentX;
+                        y += currentY;
+                    }
+                    currentX = x;
+                    currentY = y;
                     commands.push({
-                        type: type.toUpperCase(),
-                        x: coords[i],
-                        y: coords[i + 1],
-                        relative: type === 'm'
+                        type: 'M',
+                        x,
+                        y
                     });
                 }
             } else if (type === 'L' || type === 'l') {
                 for (let i = 0; i < coords.length; i += 2) {
+                    let x = coords[i];
+                    let y = coords[i + 1];
+                    if (isRelative) {
+                        x += currentX;
+                        y += currentY;
+                    }
+                    currentX = x;
+                    currentY = y;
                     commands.push({
-                        type: type.toUpperCase(),
-                        x: coords[i],
-                        y: coords[i + 1],
-                        relative: type === 'l'
+                        type: 'L',
+                        x,
+                        y
                     });
                 }
             } else if (type === 'C' || type === 'c') {
                 for (let i = 0; i < coords.length; i += 6) {
+                    let x1 = coords[i];
+                    let y1 = coords[i + 1];
+                    let x2 = coords[i + 2];
+                    let y2 = coords[i + 3];
+                    let x = coords[i + 4];
+                    let y = coords[i + 5];
+                    if (isRelative) {
+                        x1 += currentX;
+                        y1 += currentY;
+                        x2 += currentX;
+                        y2 += currentY;
+                        x += currentX;
+                        y += currentY;
+                    }
+                    currentX = x;
+                    currentY = y;
                     commands.push({
-                        type: type.toUpperCase(),
-                        x1: coords[i],
-                        y1: coords[i + 1],
-                        x2: coords[i + 2],
-                        y2: coords[i + 3],
-                        x: coords[i + 4],
-                        y: coords[i + 5],
-                        relative: type === 'c'
+                        type: 'C',
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        x,
+                        y
                     });
                 }
             } else if (type === 'Q' || type === 'q') {
                 for (let i = 0; i < coords.length; i += 4) {
+                    let x1 = coords[i];
+                    let y1 = coords[i + 1];
+                    let x = coords[i + 2];
+                    let y = coords[i + 3];
+                    if (isRelative) {
+                        x1 += currentX;
+                        y1 += currentY;
+                        x += currentX;
+                        y += currentY;
+                    }
+                    currentX = x;
+                    currentY = y;
                     commands.push({
-                        type: type.toUpperCase(),
-                        x1: coords[i],
-                        y1: coords[i + 1],
-                        x: coords[i + 2],
-                        y: coords[i + 3],
-                        relative: type === 'q'
+                        type: 'Q',
+                        x1,
+                        y1,
+                        x,
+                        y
                     });
                 }
             } else if (type === 'Z' || type === 'z') {
@@ -935,16 +1011,19 @@ class SVGEditor {
         if (commandIndex >= commands.length) return;
         
         const cmd = commands[commandIndex];
+
+        // Incoming x,y are in SVG coordinates – convert to element-local
+        const local = this.svgToElementPoint(element, x, y);
         
         if (this.currentDraggedNode.controlPoint === 1) {
-            cmd.x1 = x;
-            cmd.y1 = y;
+            cmd.x1 = local.x;
+            cmd.y1 = local.y;
         } else if (this.currentDraggedNode.controlPoint === 2) {
-            cmd.x2 = x;
-            cmd.y2 = y;
+            cmd.x2 = local.x;
+            cmd.y2 = local.y;
         } else {
-            cmd.x = x;
-            cmd.y = y;
+            cmd.x = local.x;
+            cmd.y = local.y;
         }
         
         // Rebuild path data
