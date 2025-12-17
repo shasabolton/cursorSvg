@@ -415,7 +415,7 @@ class SVGEditor {
             return;
         }
         
-        // For paths, extract all points (in element-local coordinates)
+        // For paths, extract all points in SVG coordinate space
         const pathData = element.getAttribute('d');
         if (!pathData) return;
         
@@ -424,10 +424,9 @@ class SVGEditor {
         
         commands.forEach((cmd, index) => {
             if (cmd.type === 'M' || cmd.type === 'L' || cmd.type === 'C' || cmd.type === 'Q') {
-                // Convert main point from element space to SVG space
-                const mainSvg = this.elementToSvgPoint(element, cmd.x, cmd.y);
+                // Transform point from element-local (path data) to rendered SVG space
+                const mainSvg = this.toRootCoords(element, cmd.x, cmd.y);
 
-                // Create handle for main point
                 const handle = document.createElementNS(svgNS, 'circle');
                 handle.setAttribute('class', 'node-handle');
                 handle.setAttribute('cx', mainSvg.x);
@@ -449,10 +448,9 @@ class SVGEditor {
                 this.svgElement.appendChild(handle);
                 this.nodeHandles.push(handle);
                 
-                // For curves, show control points
+                // For curves, show control points (transform to rendered space as well)
                 if (cmd.type === 'C') {
-                    // Control point 1
-                    const cp1Svg = this.elementToSvgPoint(element, cmd.x1, cmd.y1);
+                    const cp1Svg = this.toRootCoords(element, cmd.x1, cmd.y1);
                     const cp1 = document.createElementNS(svgNS, 'circle');
                     cp1.setAttribute('class', 'node-handle');
                     cp1.setAttribute('cx', cp1Svg.x);
@@ -476,8 +474,7 @@ class SVGEditor {
                     this.svgElement.appendChild(cp1);
                     this.nodeHandles.push(cp1);
                     
-                    // Control point 2
-                    const cp2Svg = this.elementToSvgPoint(element, cmd.x2, cmd.y2);
+                    const cp2Svg = this.toRootCoords(element, cmd.x2, cmd.y2);
                     const cp2 = document.createElementNS(svgNS, 'circle');
                     cp2.setAttribute('class', 'node-handle');
                     cp2.setAttribute('cx', cp2Svg.x);
@@ -518,7 +515,7 @@ class SVGEditor {
         ];
         
         corners.forEach((corner, index) => {
-            const cornerSvg = this.elementToSvgPoint(element, corner.x, corner.y);
+            const cornerSvg = this.toRootCoords(element, corner.x, corner.y);
 
             const handle = document.createElementNS(svgNS, 'circle');
             handle.setAttribute('class', 'node-handle');
@@ -561,25 +558,33 @@ class SVGEditor {
         this.nodeHandles = [];
     }
 
-    // Coordinate conversion helpers for node editing
-    svgToElementPoint(element, svgX, svgY) {
+    // Helpers to map between element-local coordinates and SVG root coordinates
+    toRootCoords(element, x, y) {
         const point = this.svgElement.createSVGPoint();
-        point.x = svgX;
-        point.y = svgY;
-        const ctm = element.getCTM();
-        if (!ctm) return { x: svgX, y: svgY };
-        const local = point.matrixTransform(ctm.inverse());
-        return { x: local.x, y: local.y };
+        point.x = x;
+        point.y = y;
+        const elemScreenCTM = element.getScreenCTM();
+        const rootScreenCTM = this.svgElement.getScreenCTM();
+        if (!elemScreenCTM || !rootScreenCTM) return { x, y };
+        // local -> screen
+        const screenPt = point.matrixTransform(elemScreenCTM);
+        // screen -> root user space
+        const rootPt = screenPt.matrixTransform(rootScreenCTM.inverse());
+        return { x: rootPt.x, y: rootPt.y };
     }
 
-    elementToSvgPoint(element, localX, localY) {
+    toLocalCoords(element, x, y) {
         const point = this.svgElement.createSVGPoint();
-        point.x = localX;
-        point.y = localY;
-        const ctm = element.getCTM();
-        if (!ctm) return { x: localX, y: localY };
-        const svgPoint = point.matrixTransform(ctm);
-        return { x: svgPoint.x, y: svgPoint.y };
+        point.x = x;
+        point.y = y;
+        const elemScreenCTM = element.getScreenCTM();
+        const rootScreenCTM = this.svgElement.getScreenCTM();
+        if (!elemScreenCTM || !rootScreenCTM) return { x, y };
+        // root user -> screen
+        const screenPt = point.matrixTransform(rootScreenCTM);
+        // screen -> local
+        const localPt = screenPt.matrixTransform(elemScreenCTM.inverse());
+        return { x: localPt.x, y: localPt.y };
     }
     
     findNearestThinElementAtPoint(elements, screenX, screenY) {
@@ -1012,8 +1017,8 @@ class SVGEditor {
         
         const cmd = commands[commandIndex];
 
-        // Incoming x,y are in SVG coordinates – convert to element-local
-        const local = this.svgToElementPoint(element, x, y);
+        // Convert from root SVG coords back into element-local coords, so that transforms on the path are respected
+        const local = this.toLocalCoords(element, x, y);
         
         if (this.currentDraggedNode.controlPoint === 1) {
             cmd.x1 = local.x;
