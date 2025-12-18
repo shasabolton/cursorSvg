@@ -13,14 +13,17 @@ class SVGEditor {
         this.currentDraggedNode = null;
         this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
         this.proximitySelectedElement = null; // Track element selected via proximity
+        this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
         this.init();
     }
     
     init() {
         // Setup file input
-        document.getElementById('openBtn').addEventListener('click', () => {
+        document.getElementById('openBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
             document.getElementById('fileInput').click();
+            this.closeMenus();
         });
         
         document.getElementById('fileInput').addEventListener('change', (e) => {
@@ -28,8 +31,10 @@ class SVGEditor {
         });
         
         // Setup save button
-        document.getElementById('saveBtn').addEventListener('click', () => {
+        document.getElementById('saveBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
             this.saveSVG();
+            this.closeMenus();
         });
         
         // Setup tool buttons
@@ -40,13 +45,341 @@ class SVGEditor {
         document.getElementById('directSelectTool').addEventListener('click', () => {
             this.setTool('direct-select');
         });
+        
+        // Setup tooltips
+        this.setupTooltips();
+        
+        // Setup control panel
+        this.setupControlPanel();
+        
+        // Setup menu interactions
+        this.setupMenus();
+        
+        // Setup keyboard shortcuts
+        this.setupKeyboardShortcuts();
+    }
+    
+    setupTooltips() {
+        const toolButtons = document.querySelectorAll('.tool-palette-btn');
+        const tooltip = document.createElement('div');
+        tooltip.className = 'floating-tooltip';
+        tooltip.style.cssText = 'position: fixed; pointer-events: none; z-index: 10000; opacity: 0; transition: opacity 0.2s;';
+        document.body.appendChild(tooltip);
+        
+        toolButtons.forEach(btn => {
+            let tooltipText = btn.getAttribute('title') || btn.querySelector('.tool-tooltip')?.textContent || '';
+            
+            btn.addEventListener('mouseenter', (e) => {
+                tooltip.textContent = tooltipText;
+                tooltip.style.opacity = '0';
+                tooltip.style.display = 'block';
+                this.updateTooltipPosition(e, tooltip);
+            });
+            
+            btn.addEventListener('mousemove', (e) => {
+                this.updateTooltipPosition(e, tooltip);
+                tooltip.style.opacity = '1';
+            });
+            
+            btn.addEventListener('mouseleave', () => {
+                tooltip.style.opacity = '0';
+                setTimeout(() => {
+                    tooltip.style.display = 'none';
+                }, 200);
+            });
+        });
+    }
+    
+    updateTooltipPosition(e, tooltip) {
+        const offset = 15;
+        tooltip.style.left = (e.clientX + offset) + 'px';
+        tooltip.style.top = (e.clientY + offset) + 'px';
+    }
+    
+    setupControlPanel() {
+        // Fill color controls
+        const fillColorInput = document.getElementById('fillColor');
+        const fillColorText = document.getElementById('fillColorText');
+        
+        fillColorInput.addEventListener('input', (e) => {
+            fillColorText.value = e.target.value.toUpperCase();
+            this.applyFillColor(e.target.value);
+        });
+        
+        fillColorText.addEventListener('change', (e) => {
+            const color = e.target.value;
+            if (this.isValidColor(color)) {
+                fillColorInput.value = color;
+                this.applyFillColor(color);
+            }
+        });
+        
+        // Stroke color controls
+        const strokeColorInput = document.getElementById('strokeColor');
+        const strokeColorText = document.getElementById('strokeColorText');
+        
+        strokeColorInput.addEventListener('input', (e) => {
+            strokeColorText.value = e.target.value.toUpperCase();
+            this.applyStrokeColor(e.target.value);
+        });
+        
+        strokeColorText.addEventListener('change', (e) => {
+            const color = e.target.value;
+            if (this.isValidColor(color)) {
+                strokeColorInput.value = color;
+                this.applyStrokeColor(color);
+            }
+        });
+        
+        // Stroke width
+        const strokeWidthInput = document.getElementById('strokeWidth');
+        strokeWidthInput.addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            if (!isNaN(value) && value >= 0) {
+                this.lastValidStrokeWidth = value;
+                this.applyStrokeWidth(value);
+            }
+        });
+        strokeWidthInput.addEventListener('change', (e) => {
+            const value = parseFloat(e.target.value);
+            if (!isNaN(value) && value >= 0) {
+                this.lastValidStrokeWidth = value;
+                this.applyStrokeWidth(value);
+            } else {
+                // Reset to last valid value if invalid
+                e.target.value = this.lastValidStrokeWidth || 1;
+                this.applyStrokeWidth(this.lastValidStrokeWidth || 1);
+            }
+        });
+        
+        // Opacity
+        const opacityInput = document.getElementById('opacity');
+        opacityInput.addEventListener('change', (e) => {
+            const opacity = parseFloat(e.target.value);
+            if (!isNaN(opacity) && opacity >= 0 && opacity <= 1) {
+                this.applyOpacity(opacity);
+            }
+        });
+    }
+    
+    isValidColor(color) {
+        const s = new Option().style;
+        s.color = color;
+        return s.color !== '';
+    }
+    
+    hexToRgb(hex) {
+        // Remove # if present
+        hex = hex.replace('#', '');
+        
+        // Handle 3-digit hex
+        if (hex.length === 3) {
+            hex = hex.split('').map(c => c + c).join('');
+        }
+        
+        const r = parseInt(hex.substr(0, 2), 16);
+        const g = parseInt(hex.substr(2, 2), 16);
+        const b = parseInt(hex.substr(4, 2), 16);
+        
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+    
+    updateControlPanel() {
+        const pathControls = document.getElementById('pathControls');
+        const emptyControls = document.getElementById('emptyControls');
+        
+        // Get the first selected element (or all if we want to show mixed values)
+        const selectedArray = Array.from(this.selectedElements);
+        
+        if (selectedArray.length === 0) {
+            pathControls.style.display = 'none';
+            emptyControls.style.display = 'block';
+            return;
+        }
+        
+        // For now, show controls for the first selected element
+        // Could be enhanced to show "mixed" values for multiple selections
+        const element = selectedArray[0];
+        
+        pathControls.style.display = 'flex';
+        emptyControls.style.display = 'none';
+        
+        // Get fill color - check attribute first, then computed style
+        let fill = element.getAttribute('fill');
+        if (!fill || fill === 'inherit') {
+            const computedStyle = window.getComputedStyle(element);
+            fill = computedStyle.fill || 'none';
+        }
+        const fillColor = this.parseColorToHex(fill);
+        document.getElementById('fillColor').value = fillColor;
+        document.getElementById('fillColorText').value = fillColor.toUpperCase();
+        
+        // Get stroke color - check attribute first, then computed style
+        let stroke = element.getAttribute('stroke');
+        if (!stroke || stroke === 'inherit') {
+            const computedStyle = window.getComputedStyle(element);
+            stroke = computedStyle.stroke || 'none';
+        }
+        const strokeColor = this.parseColorToHex(stroke);
+        document.getElementById('strokeColor').value = strokeColor;
+        document.getElementById('strokeColorText').value = strokeColor.toUpperCase();
+        
+        // Get stroke width - check attribute first, then computed style
+        let strokeWidth = element.getAttribute('stroke-width');
+        if (!strokeWidth) {
+            const computedStyle = window.getComputedStyle(element);
+            strokeWidth = computedStyle.strokeWidth || '1';
+            // Remove 'px' if present
+            strokeWidth = strokeWidth.replace('px', '');
+        }
+        const strokeWidthValue = parseFloat(strokeWidth) || 1;
+        document.getElementById('strokeWidth').value = strokeWidthValue;
+        this.lastValidStrokeWidth = strokeWidthValue;
+        
+        // Get opacity - check attribute first, then computed style
+        let opacity = element.getAttribute('opacity');
+        if (!opacity || opacity === 'inherit') {
+            const computedStyle = window.getComputedStyle(element);
+            opacity = computedStyle.opacity || '1';
+        }
+        document.getElementById('opacity').value = parseFloat(opacity) || 1;
+    }
+    
+    parseColorToHex(color) {
+        if (!color || color === 'none' || color === 'transparent' || color === 'inherit') {
+            return '#000000';
+        }
+        
+        // Trim whitespace
+        color = color.trim();
+        
+        // If already hex
+        if (color.startsWith('#')) {
+            const hex = color.slice(1);
+            if (hex.length === 3) {
+                // Expand 3-digit hex to 6-digit
+                return '#' + hex.split('').map(c => c + c).join('');
+            }
+            if (hex.length === 6) {
+                return '#' + hex;
+            }
+            return '#000000';
+        }
+        
+        // If rgb/rgba
+        const rgbMatch = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (rgbMatch) {
+            const r = parseInt(rgbMatch[1]).toString(16).padStart(2, '0');
+            const g = parseInt(rgbMatch[2]).toString(16).padStart(2, '0');
+            const b = parseInt(rgbMatch[3]).toString(16).padStart(2, '0');
+            return `#${r}${g}${b}`;
+        }
+        
+        // Try to parse as named color or any CSS color
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.fillRect(0, 0, 1, 1);
+            const data = ctx.getImageData(0, 0, 1, 1).data;
+            // Check if it's actually black (could mean it failed to parse)
+            if (data[0] === 0 && data[1] === 0 && data[2] === 0 && color.toLowerCase() !== 'black') {
+                // Might be a parsing failure, return default
+                return '#000000';
+            }
+            return '#' + [data[0], data[1], data[2]].map(x => x.toString(16).padStart(2, '0')).join('');
+        } catch (e) {
+            return '#000000';
+        }
+    }
+    
+    applyFillColor(color) {
+        this.selectedElements.forEach(element => {
+            if (color === '#000000' || color === '#000') {
+                element.setAttribute('fill', 'none');
+            } else {
+                element.setAttribute('fill', color);
+            }
+        });
+    }
+    
+    applyStrokeColor(color) {
+        this.selectedElements.forEach(element => {
+            if (color === '#000000' || color === '#000') {
+                element.setAttribute('stroke', 'none');
+            } else {
+                element.setAttribute('stroke', color);
+            }
+        });
+    }
+    
+    applyStrokeWidth(width) {
+        this.selectedElements.forEach(element => {
+            element.setAttribute('stroke-width', width);
+        });
+        console.log(width);
+    }
+    
+    applyOpacity(opacity) {
+        this.selectedElements.forEach(element => {
+            element.setAttribute('opacity', opacity);
+        });
+    }
+    
+    setupMenus() {
+        const menuItems = document.querySelectorAll('.menu-item');
+        
+        menuItems.forEach(item => {
+            const label = item.querySelector('.menu-label');
+            
+            label.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Toggle active state
+                const isActive = item.classList.contains('active');
+                this.closeMenus();
+                if (!isActive) {
+                    item.classList.add('active');
+                }
+            });
+        });
+        
+        // Close menus when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.menu-item')) {
+                this.closeMenus();
+            }
+        });
+    }
+    
+    closeMenus() {
+        document.querySelectorAll('.menu-item').forEach(item => {
+            item.classList.remove('active');
+        });
+    }
+    
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+O for Open
+            if (e.ctrlKey && e.key === 'o') {
+                e.preventDefault();
+                document.getElementById('fileInput').click();
+            }
+            
+            // Ctrl+S for Save
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                this.saveSVG();
+            }
+        });
     }
     
     setTool(tool) {
         this.currentTool = tool;
         
         // Update UI
-        document.querySelectorAll('.tool-btn').forEach(btn => {
+        document.querySelectorAll('.tool-palette-btn').forEach(btn => {
             btn.classList.remove('active');
         });
         document.querySelector(`[data-tool="${tool}"]`).classList.add('active');
@@ -369,6 +702,9 @@ class SVGEditor {
         
         // Force a reflow to ensure the class is applied
         element.offsetHeight;
+        
+        // Update control panel when selection changes
+        this.updateControlPanel();
     }
     
     clearSelection() {
@@ -377,6 +713,7 @@ class SVGEditor {
         });
         this.selectedElements.clear();
         this.clearNodeHandles();
+        this.updateControlPanel();
     }
     
     getElementTransform(element) {
@@ -1088,9 +1425,13 @@ class SVGEditor {
         URL.revokeObjectURL(url);
     }
 
-    getSelectedPathSize(){
+    getSelectedProperties(){
         for (const path of this.selectedElements) {
-            console.log(path.getTotalLength());
+            console.log("length: ", path.getTotalLength()); //get the length of the path
+            console.log("fill: ", path.getAttribute('fill')); //get the fill color of the path
+            console.log("stroke: ", path.getAttribute('stroke')); //get the stroke color of the path
+            console.log("stroke-width: ", path.getAttribute('stroke-width')); //get the stroke width of the path
+            console.log("opacity: ", path.getAttribute('opacity')); //get the opacity of the path
           }
     }
 }
@@ -1099,7 +1440,7 @@ class SVGEditor {
 var activeEditor;
 document.addEventListener('DOMContentLoaded', () => {
     activeEditor =new SVGEditor();
-    console.log("v2");
+    console.log("v4");
 });
 
 

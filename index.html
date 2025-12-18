@@ -8,24 +8,67 @@
 </head>
 <body>
     <div class="app-container">
-        <header class="toolbar">
-            <div class="toolbar-section">
-                <input type="file" id="fileInput" accept=".svg" style="display: none;">
-                <button id="openBtn" class="btn">Open SVG</button>
-                <button id="saveBtn" class="btn">Save SVG</button>
-            </div>
-            <div class="toolbar-section">
-                <button id="selectTool" class="btn tool-btn active" data-tool="select">Select</button>
-                <button id="directSelectTool" class="btn tool-btn" data-tool="direct-select">Direct Select</button>
+        <header class="menu-bar">
+            <div class="menu-item">
+                <span class="menu-label">File</span>
+                <div class="menu-dropdown">
+                    <input type="file" id="fileInput" accept=".svg" style="display: none;">
+                    <div class="menu-option" id="openBtn">
+                        <span>Open...</span>
+                        <span class="menu-shortcut">Ctrl+O</span>
+                    </div>
+                    <div class="menu-option" id="saveBtn">
+                        <span>Save</span>
+                        <span class="menu-shortcut">Ctrl+S</span>
+                    </div>
+                </div>
             </div>
         </header>
         
-        <div class="main-content">
-            <aside class="layers-panel">
-                <h3>Layers</h3>
-                <div id="layersList" class="layers-list">
-                    <p class="empty-message">Open an SVG file to see layers V1</p>
+        <div class="control-panel">
+            <div class="control-group" id="pathControls" style="display: none;">
+                <label class="control-label">Fill:</label>
+                <div class="color-input-wrapper">
+                    <input type="color" id="fillColor" class="color-input" value="#000000">
+                    <input type="text" id="fillColorText" class="color-text-input" value="#000000" placeholder="#000000">
                 </div>
+                
+                <label class="control-label">Stroke:</label>
+                <div class="color-input-wrapper">
+                    <input type="color" id="strokeColor" class="color-input" value="#000000">
+                    <input type="text" id="strokeColorText" class="color-text-input" value="#000000" placeholder="#000000">
+                </div>
+                
+                <label class="control-label">Stroke Width:</label>
+                <input type="number" id="strokeWidth" class="number-input" value="1" min="0" step="0.1">
+                
+                <label class="control-label">Opacity:</label>
+                <input type="number" id="opacity" class="number-input" value="1" min="0" max="1" step="0.01">
+            </div>
+            
+            <div class="control-group empty-controls" id="emptyControls">
+                <span class="control-hint">Select an object to edit properties</span>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <aside class="tool-palette">
+                <button id="selectTool" class="tool-palette-btn active" data-tool="select" title="Select">
+                    <svg class="tool-icon" viewBox="0 0 24 24" width="24" height="24">
+                        <!-- Black arrow cursor (Select tool) -->
+                        <path d="M3 3l7 18 3-8 8-3L3 3z" fill="currentColor" stroke="none"/>
+                        <path d="M3 3l7 18 3-8 8-3" stroke="white" stroke-width="0.8" fill="none" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="tool-tooltip">Select</span>
+                </button>
+                <button id="directSelectTool" class="tool-palette-btn" data-tool="direct-select" title="Direct Select">
+                    <svg class="tool-icon" viewBox="0 0 24 24" width="24" height="24">
+                        <!-- White arrow cursor (Direct Select tool) -->
+                        <path d="M6 4l8 17M14 8l7-4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="6" cy="4" r="2.5" fill="white" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                    <span class="tool-tooltip">Direct Select</span>
+                </button>
             </aside>
             
             <main class="canvas-container">
@@ -35,6 +78,13 @@
                     </div>
                 </div>
             </main>
+            
+            <aside class="layers-panel">
+                <h3>Layers</h3>
+                <div id="layersList" class="layers-list">
+                    <p class="empty-message">Open an SVG file to see layers V1</p>
+                </div>
+            </aside>
         </div>
     </div>
     

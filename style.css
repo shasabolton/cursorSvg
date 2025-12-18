@@ -8,7 +8,8 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     height: 100vh;
     overflow: hidden;
-    background: #f5f5f5;
+    background: #1e1e1e;
+    color: #e0e0e0;
 }
 
 .app-container {
@@ -17,47 +18,229 @@ body {
     height: 100vh;
 }
 
-.toolbar {
+.menu-bar {
     background: #2d2d2d;
+    border-bottom: 1px solid #404040;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    height: 24px;
+    font-size: 13px;
+    user-select: none;
+}
+
+.menu-item {
+    position: relative;
+    padding: 4px 12px;
+    cursor: default;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    color: #e0e0e0;
+}
+
+.menu-item:hover {
+    background: #3d3d3d;
+}
+
+.menu-item.active {
+    background: #0078d4;
     color: white;
-    padding: 10px 20px;
+}
+
+.menu-label {
+    font-weight: normal;
+}
+
+.menu-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    background: #2d2d2d;
+    border: 1px solid #404040;
+    box-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+    min-width: 180px;
+    display: none;
+    z-index: 1000;
+    padding: 2px 0;
+}
+
+.menu-item.active .menu-dropdown,
+.menu-item:hover .menu-dropdown {
+    display: block;
+}
+
+.menu-option {
+    padding: 4px 20px 4px 30px;
+    cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    white-space: nowrap;
+    color: #e0e0e0;
 }
 
-.toolbar-section {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-
-.btn {
-    padding: 8px 16px;
-    background: #4a4a4a;
+.menu-option:hover {
+    background: #0078d4;
     color: white;
+}
+
+.menu-shortcut {
+    color: #888;
+    font-size: 11px;
+    margin-left: 20px;
+}
+
+.menu-option:hover .menu-shortcut {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.control-panel {
+    background: #2d2d2d;
+    border-bottom: 1px solid #404040;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 40px;
+    flex-wrap: wrap;
+}
+
+.control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.control-label {
+    font-size: 12px;
+    color: #cccccc;
+    white-space: nowrap;
+}
+
+.control-hint {
+    font-size: 12px;
+    color: #888;
+    font-style: italic;
+}
+
+.color-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.color-input {
+    width: 32px;
+    height: 24px;
+    border: 1px solid #404040;
+    border-radius: 3px;
+    cursor: pointer;
+    background: transparent;
+    padding: 0;
+}
+
+.color-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-input::-webkit-color-swatch {
+    border: 1px solid #404040;
+    border-radius: 2px;
+}
+
+.color-text-input {
+    width: 70px;
+    height: 24px;
+    background: #1e1e1e;
+    border: 1px solid #404040;
+    border-radius: 3px;
+    padding: 4px 6px;
+    color: #e0e0e0;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.color-text-input:focus {
+    outline: none;
+    border-color: #0078d4;
+}
+
+.number-input {
+    width: 60px;
+    height: 24px;
+    background: #1e1e1e;
+    border: 1px solid #404040;
+    border-radius: 3px;
+    padding: 4px 6px;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+.number-input:focus {
+    outline: none;
+    border-color: #0078d4;
+}
+
+.tool-palette {
+    width: 48px;
+    background: #252526;
+    border-right: 1px solid #404040;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    gap: 4px;
+}
+
+.tool-palette-btn {
+    width: 40px;
+    height: 40px;
+    background: transparent;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
-    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    color: #cccccc;
+    transition: background 0.2s, color 0.2s;
 }
 
-.btn:hover {
-    background: #5a5a5a;
+.tool-palette-btn:hover {
+    background: #2a2d2e;
+    color: #ffffff;
 }
 
-.btn:active {
-    background: #3a3a3a;
+.tool-palette-btn.active {
+    background: #094771;
+    color: #ffffff;
 }
 
-.tool-btn.active {
-    background: #007acc;
+.tool-palette-btn.active:hover {
+    background: #0e639c;
 }
 
-.tool-btn.active:hover {
-    background: #0088dd;
+.tool-icon {
+    pointer-events: none;
+}
+
+.tool-tooltip {
+    display: none;
+}
+
+.floating-tooltip {
+    position: fixed;
+    background: #404040;
+    color: #e0e0e0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10000;
+    box-shadow: 2px 2px 8px rgba(0,0,0,0.5);
 }
 
 .main-content {
@@ -68,8 +251,8 @@ body {
 
 .layers-panel {
     width: 250px;
-    background: white;
-    border-right: 1px solid #ddd;
+    background: #252526;
+    border-left: 1px solid #404040;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -77,9 +260,9 @@ body {
 
 .layers-panel h3 {
     padding: 15px;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 1px solid #404040;
     font-size: 16px;
-    color: #333;
+    color: #e0e0e0;
 }
 
 .layers-list {
@@ -97,15 +280,16 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    color: #e0e0e0;
 }
 
 .layer-item:hover {
-    background: #f0f0f0;
+    background: #2a2d2e;
 }
 
 .layer-item.selected {
-    background: #e3f2fd;
-    border-left: 3px solid #2196f3;
+    background: #094771;
+    border-left: 3px solid #007acc;
 }
 
 .layer-item input[type="checkbox"] {
@@ -117,20 +301,20 @@ body {
     cursor: pointer;
     user-select: none;
     font-size: 14px;
-    color: #333;
+    color: #e0e0e0;
 }
 
 .empty-message {
     padding: 20px;
     text-align: center;
-    color: #999;
+    color: #888;
     font-size: 14px;
 }
 
 .canvas-container {
     flex: 1;
     overflow: auto;
-    background: #fafafa;
+    background: #1e1e1e;
     position: relative;
 }
 
@@ -146,16 +330,16 @@ body {
 
 .empty-state {
     text-align: center;
-    color: #999;
+    color: #888;
     font-size: 16px;
 }
 
 .svg-container svg {
     max-width: 100%;
     max-height: 100%;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    border: 1px solid #ddd;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    border: 1px solid #404040;
 }
 
 .svg-container svg path,
