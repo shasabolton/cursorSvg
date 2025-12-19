@@ -160,6 +160,12 @@ class SVGEditor {
                 this.applyOpacity(opacity);
             }
         });
+        
+        // Log attributes button
+        const logAttributesBtn = document.getElementById('logAttributesBtn');
+        logAttributesBtn.addEventListener('click', () => {
+            this.logAllAttributes();
+        });
     }
     
     isValidColor(color) {
@@ -297,6 +303,21 @@ class SVGEditor {
     
     applyFillColor(color) {
         this.selectedElements.forEach(element => {
+            // Remove fill from style attribute if it exists
+            const style = element.getAttribute('style');
+            if (style) {
+                const stylePairs = style.split(';').filter(pair => {
+                    const trimmed = pair.trim();
+                    return trimmed && !trimmed.toLowerCase().startsWith('fill');
+                });
+                const newStyle = stylePairs.join(';').trim();
+                if (newStyle) {
+                    element.setAttribute('style', newStyle);
+                } else {
+                    element.removeAttribute('style');
+                }
+            }
+            // Set fill as an attribute (this will replace any existing one)
             if (color === '#000000' || color === '#000') {
                 element.setAttribute('fill', 'none');
             } else {
@@ -307,6 +328,21 @@ class SVGEditor {
     
     applyStrokeColor(color) {
         this.selectedElements.forEach(element => {
+            // Remove stroke from style attribute if it exists
+            const style = element.getAttribute('style');
+            if (style) {
+                const stylePairs = style.split(';').filter(pair => {
+                    const trimmed = pair.trim();
+                    return trimmed && !trimmed.toLowerCase().startsWith('stroke:') && !trimmed.toLowerCase().startsWith('stroke ');
+                });
+                const newStyle = stylePairs.join(';').trim();
+                if (newStyle) {
+                    element.setAttribute('style', newStyle);
+                } else {
+                    element.removeAttribute('style');
+                }
+            }
+            // Set stroke as an attribute (this will replace any existing one)
             if (color === '#000000' || color === '#000') {
                 element.setAttribute('stroke', 'none');
             } else {
@@ -317,6 +353,22 @@ class SVGEditor {
     
     applyStrokeWidth(width) {
         this.selectedElements.forEach(element => {
+            // Remove stroke-width from style attribute if it exists
+            const style = element.getAttribute('style');
+            if (style) {
+                // Remove stroke-width from style string
+                const stylePairs = style.split(';').filter(pair => {
+                    const trimmed = pair.trim();
+                    return trimmed && !trimmed.toLowerCase().startsWith('stroke-width');
+                });
+                const newStyle = stylePairs.join(';').trim();
+                if (newStyle) {
+                    element.setAttribute('style', newStyle);
+                } else {
+                    element.removeAttribute('style');
+                }
+            }
+            // Set stroke-width as an attribute (this will replace any existing one)
             element.setAttribute('stroke-width', width);
         });
         console.log(width);
@@ -324,6 +376,21 @@ class SVGEditor {
     
     applyOpacity(opacity) {
         this.selectedElements.forEach(element => {
+            // Remove opacity from style attribute if it exists
+            const style = element.getAttribute('style');
+            if (style) {
+                const stylePairs = style.split(';').filter(pair => {
+                    const trimmed = pair.trim();
+                    return trimmed && !trimmed.toLowerCase().startsWith('opacity');
+                });
+                const newStyle = stylePairs.join(';').trim();
+                if (newStyle) {
+                    element.setAttribute('style', newStyle);
+                } else {
+                    element.removeAttribute('style');
+                }
+            }
+            // Set opacity as an attribute (this will replace any existing one)
             element.setAttribute('opacity', opacity);
         });
     }
@@ -1433,6 +1500,38 @@ class SVGEditor {
             console.log("stroke-width: ", path.getAttribute('stroke-width')); //get the stroke width of the path
             console.log("opacity: ", path.getAttribute('opacity')); //get the opacity of the path
           }
+    }
+
+    logAllAttributes() {
+        if (this.selectedElements.size === 0) {
+            console.log("No elements selected");
+            return;
+        }
+
+        this.selectedElements.forEach((element, index) => {
+            console.log(`\n=== Element ${index + 1} (${element.tagName}) ===`);
+            
+            // Get all attribute names
+            const attributeNames = element.getAttributeNames();
+            
+            if (attributeNames.length === 0) {
+                console.log("No attributes found");
+            } else {
+                // Create an object with all attributes
+                const attributes = {};
+                attributeNames.forEach(attrName => {
+                    attributes[attrName] = element.getAttribute(attrName);
+                });
+                
+                // Log the attributes object for easy inspection
+                console.log("All attributes:", attributes);
+                
+                // Also log each attribute individually for clarity
+                attributeNames.forEach(attrName => {
+                    console.log(`  ${attrName}: ${element.getAttribute(attrName)}`);
+                });
+            }
+        });
     }
 }
 

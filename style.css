@@ -182,6 +182,28 @@ body {
     border-color: #0078d4;
 }
 
+.control-button {
+    height: 24px;
+    background: #1e1e1e;
+    border: 1px solid #404040;
+    border-radius: 3px;
+    padding: 4px 12px;
+    color: #e0e0e0;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.control-button:hover {
+    background: #2d2d30;
+    border-color: #0078d4;
+}
+
+.control-button:active {
+    background: #0078d4;
+    border-color: #0078d4;
+}
+
 .tool-palette {
     width: 48px;
     background: #252526;
