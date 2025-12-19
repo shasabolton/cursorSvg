@@ -707,4 +707,13 @@ body {
     fill: #ff5722;
 }
 
+.bounding-box-group {
+    pointer-events: none;
+}
+
+.bounding-box-group .bbox-handle,
+.bounding-box-group .bbox-rotation-handle {
+    pointer-events: all;
+}
+
 

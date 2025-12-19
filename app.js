@@ -5,6 +5,7 @@ class SVGEditor {
         this.selectedNodes = new Set();
         this.layers = [];
         this.svgElement = null;
+        this.svgWrapper = null;
         this.isDragging = false;
         this.dragStart = { x: 0, y: 0 };
         this.dragOffset = { x: 0, y: 0 };
@@ -18,6 +19,22 @@ class SVGEditor {
         // Load DPI from localStorage or use default (96 DPI is standard)
         this.dpi = parseFloat(localStorage.getItem('svgEditorDPI')) || 96;
         this.transformUnit = localStorage.getItem('svgEditorTransformUnit') || 'px';
+        
+        // Zoom and pan state
+        this.zoomLevel = 1.0;
+        this.panOffset = { x: 0, y: 0 };
+        this.isPanning = false;
+        this.panStart = { x: 0, y: 0 };
+        this.panStartOffset = { x: 0, y: 0 };
+        
+        // Bounding box and transform handles
+        this.boundingBoxOverlay = null;
+        this.boundingBox = null;
+        this.isTransforming = false;
+        this.transformHandle = null;
+        this.transformStart = { x: 0, y: 0 };
+        this.transformStartBBox = null;
+        this.transformCenter = { x: 0, y: 0 };
         
         this.init();
     }
@@ -490,15 +507,36 @@ class SVGEditor {
         // Clear previous content
         const container = document.getElementById('svgContainer');
         container.innerHTML = '';
+        this.svgWrapper = null;
         
-        // Clone and add SVG
+        // Create wrapper div for zoom/pan transforms
+        const wrapper = document.createElement('div');
+        wrapper.className = 'svg-wrapper';
+        wrapper.style.cssText = 'display: inline-block; transform-origin: 0 0;';
+        
+        // Clone and add SVG to wrapper
         this.svgElement = svg.cloneNode(true);
-        container.appendChild(this.svgElement);
+        wrapper.appendChild(this.svgElement);
+        container.appendChild(wrapper);
+        this.svgWrapper = wrapper;
+        
+        // Reset zoom and pan for new SVG
+        this.zoomLevel = 1.0;
+        this.panOffset = { x: 0, y: 0 };
+        this.applyTransform();
         
         // Extract layers (paths and other drawable elements)
         this.extractLayers();
         this.renderLayersPanel();
         this.attachEventListeners();
+        
+        // Create or recreate bounding box overlay
+        // Remove old one if it exists
+        const oldBBoxGroup = this.svgElement.querySelector('#boundingBoxGroup');
+        if (oldBBoxGroup) {
+            oldBBoxGroup.remove();
+        }
+        this.createBoundingBoxOverlay();
     }
     
     extractLayers() {
@@ -506,6 +544,9 @@ class SVGEditor {
         const elements = this.svgElement.querySelectorAll('path, circle, rect, ellipse, line, polyline, polygon, g');
         
         elements.forEach((el, index) => {
+            // Skip bounding box group
+            if (el.id === 'boundingBoxGroup') return;
+            
             // Skip groups that only contain other elements we're already tracking
             if (el.tagName === 'g') {
                 const hasDrawableChildren = el.querySelector('path, circle, rect, ellipse, line, polyline, polygon');
@@ -589,7 +630,17 @@ class SVGEditor {
         
         // Use event delegation on the SVG element itself
         this.svgElement.addEventListener('mousedown', (e) => {
+            // Ignore middle mouse button (panning)
+            if (e.button === 1) {
+                return;
+            }
+            
             const target = e.target;
+            
+            // Ignore bounding box handles - they have their own handlers
+            if (target && (target.classList.contains('bbox-handle') || target.classList.contains('bbox-rotation-handle'))) {
+                return;
+            }
             
             // First check for direct hit
             if (target && target !== this.svgElement && 
@@ -605,11 +656,14 @@ class SVGEditor {
                 // No direct hit - check for proximity to thin elements (paths, lines, etc.)
                 // First get elements at the click point to respect z-order
                 const elementsAtPoint = document.elementsFromPoint(e.clientX, e.clientY);
-                const thinElementsAtPoint = elementsAtPoint.filter(el => 
-                    el !== this.svgElement && 
-                    (el.tagName === 'path' || el.tagName === 'line' || 
-                     el.tagName === 'polyline' || el.tagName === 'polygon')
-                );
+                const thinElementsAtPoint = elementsAtPoint.filter(el => {
+                    // Skip bounding box elements
+                    if (el.closest && el.closest('#boundingBoxGroup')) return false;
+                    if (el.classList && (el.classList.contains('bbox-handle') || el.classList.contains('bbox-rotation-handle'))) return false;
+                    return el !== this.svgElement && 
+                           (el.tagName === 'path' || el.tagName === 'line' || 
+                            el.tagName === 'polyline' || el.tagName === 'polygon');
+                });
                 
                 // Check elements at the point first (respects z-order)
                 let nearestElement = null;
@@ -662,6 +716,9 @@ class SVGEditor {
         this.svgElement.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         document.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+        
+        // Add zoom and pan event handlers
+        this.setupZoomAndPan();
     }
     
     handleMouseDown(e, element) {
@@ -711,6 +768,25 @@ class SVGEditor {
     }
     
     handleMouseMove(e) {
+        // Handle panning with middle mouse button
+        if (this.isPanning) {
+            const container = document.getElementById('svgContainer');
+            if (container) {
+                const deltaX = e.clientX - this.panStart.x;
+                const deltaY = e.clientY - this.panStart.y;
+                this.panOffset.x = this.panStartOffset.x + deltaX;
+                this.panOffset.y = this.panStartOffset.y + deltaY;
+                this.applyTransform();
+            }
+            return;
+        }
+        
+        // Handle bounding box transforms (scale/rotate)
+        if (this.isTransforming && this.currentTool === 'select') {
+            this.handleBoundingBoxTransform(e);
+            return;
+        }
+        
         if (this.currentTool === 'select' && this.isDragging && this.currentDraggedElement) {
             // Check if we've moved enough to consider it a drag
             const moveThreshold = 3;
@@ -735,6 +811,9 @@ class SVGEditor {
             this.moveElement(this.currentDraggedElement, 
                 this.dragOffset.x + deltaX, 
                 this.dragOffset.y + deltaY);
+            
+            // Update bounding box during drag
+            this.updateBoundingBox();
         } else if (this.currentTool === 'direct-select' && this.isDragging && this.currentDraggedNode) {
             const rect = this.svgElement.getBoundingClientRect();
             const point = this.svgElement.createSVGPoint();
@@ -769,7 +848,116 @@ class SVGEditor {
             this.wasDragging = false;
             // Update layers panel after drag completes
             this.renderLayersPanel();
+            // Update bounding box after drag completes
+            this.updateBoundingBox();
         }
+        
+        // Handle pan end
+        if (this.isPanning && e.button === 1) {
+            this.isPanning = false;
+            e.preventDefault();
+        }
+        
+        // Handle transform end
+        if (this.isTransforming) {
+            this.isTransforming = false;
+            this.transformHandle = null;
+        }
+    }
+    
+    setupZoomAndPan() {
+        if (!this.svgElement) return;
+        
+        const container = document.getElementById('svgContainer');
+        if (!container) return;
+        
+        // Handle mouse wheel for zooming
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            if (!this.svgElement) return;
+            
+            // Get mouse position relative to container
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            // Calculate zoom factor (positive deltaY = scroll down = zoom out)
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+            const newZoom = this.zoomLevel * zoomFactor;
+            
+            // Limit zoom range
+            const minZoom = 0.1;
+            const maxZoom = 10;
+            if (newZoom < minZoom || newZoom > maxZoom) return;
+            
+            // Calculate point in SVG coordinates before zoom
+            // First, convert mouse position to SVG coordinates
+            const pointBeforeZoom = {
+                x: (mouseX - this.panOffset.x) / this.zoomLevel,
+                y: (mouseY - this.panOffset.y) / this.zoomLevel
+            };
+            
+            // Apply zoom
+            this.zoomLevel = newZoom;
+            
+            // Adjust pan so the same point is under the mouse after zoom
+            this.panOffset.x = mouseX - pointBeforeZoom.x * this.zoomLevel;
+            this.panOffset.y = mouseY - pointBeforeZoom.y * this.zoomLevel;
+            
+            this.applyTransform();
+        }, { passive: false });
+        
+        // Handle middle mouse button for panning
+        container.addEventListener('mousedown', (e) => {
+            if (e.button === 1) { // Middle mouse button
+                e.preventDefault();
+                this.isPanning = true;
+                this.panStart.x = e.clientX;
+                this.panStart.y = e.clientY;
+                this.panStartOffset.x = this.panOffset.x;
+                this.panStartOffset.y = this.panOffset.y;
+                container.style.cursor = 'grabbing';
+            }
+        });
+        
+        // Update cursor on mouse move when panning
+        container.addEventListener('mousemove', (e) => {
+            if (e.buttons === 4) { // Middle mouse button pressed
+                container.style.cursor = 'grabbing';
+            } else if (!this.isPanning) {
+                container.style.cursor = 'default';
+            }
+        });
+        
+        // Reset cursor when mouse leaves container
+        container.addEventListener('mouseleave', () => {
+            if (!this.isPanning) {
+                container.style.cursor = 'default';
+            }
+        });
+        
+        // Reset cursor when panning ends
+        document.addEventListener('mouseup', (e) => {
+            if (e.button === 1 && this.isPanning) {
+                container.style.cursor = 'default';
+            }
+        });
+        
+        // Prevent context menu on middle mouse button
+        container.addEventListener('contextmenu', (e) => {
+            if (e.button === 1) {
+                e.preventDefault();
+            }
+        });
+    }
+    
+    applyTransform() {
+        if (!this.svgWrapper) return;
+        
+        // Apply transform to wrapper div
+        const transform = `translate(${this.panOffset.x}px, ${this.panOffset.y}px) scale(${this.zoomLevel})`;
+        this.svgWrapper.style.transform = transform;
     }
     
     selectElement(element, multiSelect = false) {
@@ -795,6 +983,9 @@ class SVGEditor {
         
         // Update transform panel when selection changes
         this.updateTransformPanel();
+        
+        // Update bounding box
+        this.updateBoundingBox();
     }
     
     clearSelection() {
@@ -805,6 +996,7 @@ class SVGEditor {
         this.clearNodeHandles();
         this.updateControlPanel();
         this.updateTransformPanel();
+        this.updateBoundingBox();
     }
     
     getElementTransform(element) {
@@ -1774,6 +1966,395 @@ class SVGEditor {
             default:
                 return 'px';
         }
+    }
+    
+    createBoundingBoxOverlay() {
+        if (!this.svgElement) return;
+        
+        // Create a group inside the SVG for the bounding box
+        // This ensures it's positioned correctly and doesn't block other elements
+        const bboxGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        bboxGroup.id = 'boundingBoxGroup';
+        bboxGroup.setAttribute('class', 'bounding-box-group');
+        bboxGroup.style.pointerEvents = 'none';
+        
+        // Append to SVG (at the end so it's on top)
+        this.svgElement.appendChild(bboxGroup);
+        
+        this.boundingBoxOverlay = bboxGroup;
+    }
+    
+    updateBoundingBox() {
+        if (!this.boundingBoxOverlay || !this.svgElement) return;
+        
+        // Clear existing bounding box
+        this.boundingBoxOverlay.innerHTML = '';
+        
+        if (this.selectedElements.size === 0) {
+            return;
+        }
+        
+        // Calculate combined bounding box in SVG root coordinates
+        // Convert each element's bounding box corners to root coordinates (like node handles do)
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+        
+        this.selectedElements.forEach(element => {
+            try {
+                const bbox = element.getBBox();
+                // Get all four corners of the bounding box
+                const corners = [
+                    { x: bbox.x, y: bbox.y }, // top-left
+                    { x: bbox.x + bbox.width, y: bbox.y }, // top-right
+                    { x: bbox.x + bbox.width, y: bbox.y + bbox.height }, // bottom-right
+                    { x: bbox.x, y: bbox.y + bbox.height } // bottom-left
+                ];
+                
+                // Convert each corner to root SVG coordinates (same as node handles)
+                corners.forEach(corner => {
+                    const rootCoords = this.toRootCoords(element, corner.x, corner.y);
+                    minX = Math.min(minX, rootCoords.x);
+                    minY = Math.min(minY, rootCoords.y);
+                    maxX = Math.max(maxX, rootCoords.x);
+                    maxY = Math.max(maxY, rootCoords.y);
+                });
+            } catch (e) {
+                // Skip elements that don't support getBBox
+            }
+        });
+        
+        if (minX === Infinity || minY === Infinity) return;
+        
+        // Store bounding box info in SVG root coordinates
+        this.boundingBox = {
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        };
+        
+        // Position and size of bounding box in SVG root coordinates
+        const padding = 10;
+        const x = this.boundingBox.x;
+        const y = this.boundingBox.y;
+        const width = this.boundingBox.width;
+        const height = this.boundingBox.height;
+        
+        // Set pointer events on the group - allow events on handles only
+        this.boundingBoxOverlay.style.pointerEvents = 'none';
+        
+        // Create bounding box rectangle
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', x - padding);
+        rect.setAttribute('y', y - padding);
+        rect.setAttribute('width', width + padding * 2);
+        rect.setAttribute('height', height + padding * 2);
+        rect.setAttribute('fill', 'none');
+        rect.setAttribute('stroke', '#0078d4');
+        rect.setAttribute('stroke-width', '2');
+        rect.setAttribute('stroke-dasharray', '5,5');
+        rect.setAttribute('class', 'bounding-box');
+        this.boundingBoxOverlay.appendChild(rect);
+        
+        // Store transform center in SVG coordinates
+        this.transformCenter = {
+            x: x + width / 2,
+            y: y + height / 2
+        };
+        
+        // Store in SVG coordinates for transforms
+        this.transformCenterSVG = {
+            x: this.boundingBox.x + this.boundingBox.width / 2,
+            y: this.boundingBox.y + this.boundingBox.height / 2
+        };
+        
+        // Create resize handles (8 handles: corners and edges)
+        const handlePositions = [
+            { x: x - padding, y: y - padding, cursor: 'nw-resize', type: 'nw' }, // top-left
+            { x: x + width / 2, y: y - padding, cursor: 'n-resize', type: 'n' }, // top
+            { x: x + width + padding, y: y - padding, cursor: 'ne-resize', type: 'ne' }, // top-right
+            { x: x + width + padding, y: y + height / 2, cursor: 'e-resize', type: 'e' }, // right
+            { x: x + width + padding, y: y + height + padding, cursor: 'se-resize', type: 'se' }, // bottom-right
+            { x: x + width / 2, y: y + height + padding, cursor: 's-resize', type: 's' }, // bottom
+            { x: x - padding, y: y + height + padding, cursor: 'sw-resize', type: 'sw' }, // bottom-left
+            { x: x - padding, y: y + height / 2, cursor: 'w-resize', type: 'w' } // left
+        ];
+        
+        handlePositions.forEach(pos => {
+            const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            handle.setAttribute('cx', pos.x);
+            handle.setAttribute('cy', pos.y);
+            handle.setAttribute('r', '6');
+            handle.setAttribute('fill', '#ffffff');
+            handle.setAttribute('stroke', '#0078d4');
+            handle.setAttribute('stroke-width', '2');
+            handle.setAttribute('class', 'bbox-handle');
+            handle.setAttribute('data-type', pos.type);
+            handle.setAttribute('data-handle-type', pos.type);
+            handle.style.pointerEvents = 'all';
+            handle.style.cursor = pos.cursor;
+            handle.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.handleBoundingBoxHandleDown(e, pos.type);
+            });
+            this.boundingBoxOverlay.appendChild(handle);
+        });
+        
+        // Create rotation handle (above the bounding box)
+        const rotationHandleY = y - padding - 30;
+        const rotationHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        rotationHandle.setAttribute('cx', this.transformCenter.x);
+        rotationHandle.setAttribute('cy', rotationHandleY);
+        rotationHandle.setAttribute('r', '6');
+        rotationHandle.setAttribute('fill', '#ffffff');
+        rotationHandle.setAttribute('stroke', '#ff4081');
+        rotationHandle.setAttribute('stroke-width', '2');
+        rotationHandle.setAttribute('class', 'bbox-rotation-handle');
+        rotationHandle.style.pointerEvents = 'all';
+        rotationHandle.style.cursor = 'crosshair';
+        rotationHandle.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            this.handleBoundingBoxHandleDown(e, 'rotate');
+        });
+        this.boundingBoxOverlay.appendChild(rotationHandle);
+        
+        // Draw line from center to rotation handle
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', this.transformCenter.x);
+        line.setAttribute('y1', this.transformCenter.y);
+        line.setAttribute('x2', this.transformCenter.x);
+        line.setAttribute('y2', rotationHandleY);
+        line.setAttribute('stroke', '#ff4081');
+        line.setAttribute('stroke-width', '1');
+        line.setAttribute('stroke-dasharray', '3,3');
+        this.boundingBoxOverlay.appendChild(line);
+    }
+    
+    handleBoundingBoxHandleDown(e, handleType) {
+        if (this.currentTool !== 'select' || this.selectedElements.size === 0) return;
+        
+        e.stopPropagation();
+        e.preventDefault();
+        
+        this.isTransforming = true;
+        this.transformHandle = handleType;
+        
+        // Store initial mouse position and bounding box
+        const point = this.svgElement.createSVGPoint();
+        point.x = e.clientX;
+        point.y = e.clientY;
+        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+        
+        this.transformStart = {
+            x: svgPoint.x,
+            y: svgPoint.y
+        };
+        
+        this.transformStartBBox = { ...this.boundingBox };
+        
+        // Calculate center point in SVG coordinates
+        const svgRect = this.svgElement.getBoundingClientRect();
+        const svgViewBox = this.svgElement.viewBox.baseVal;
+        const scaleX = svgRect.width / (svgViewBox.width || this.svgElement.clientWidth);
+        const scaleY = svgRect.height / (svgViewBox.height || this.svgElement.clientHeight);
+        
+        this.transformCenter = {
+            x: (this.boundingBox.x + this.boundingBox.width / 2) * scaleX / scaleX,
+            y: (this.boundingBox.y + this.boundingBox.height / 2) * scaleY / scaleY
+        };
+    }
+    
+    handleBoundingBoxTransform(e) {
+        if (!this.isTransforming || !this.transformHandle || !this.boundingBox) return;
+        
+        // Convert mouse position to SVG coordinates
+        const point = this.svgElement.createSVGPoint();
+        point.x = e.clientX;
+        point.y = e.clientY;
+        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+        
+        if (this.transformHandle === 'rotate') {
+            // Handle rotation
+            const dx = svgPoint.x - (this.transformStartBBox.x + this.transformStartBBox.width / 2);
+            const dy = svgPoint.y - (this.transformStartBBox.y + this.transformStartBBox.height / 2);
+            const startDx = this.transformStart.x - (this.transformStartBBox.x + this.transformStartBBox.width / 2);
+            const startDy = this.transformStart.y - (this.transformStartBBox.y + this.transformStartBBox.height / 2);
+            
+            const angle = Math.atan2(dy, dx) - Math.atan2(startDy, startDx);
+            const angleDeg = angle * (180 / Math.PI);
+            
+            // Apply rotation to all selected elements
+            this.selectedElements.forEach(element => {
+                const currentTransform = this.getElementTransform(element);
+                const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
+                const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
+                
+                // Get element's center relative to transform center
+                const bbox = element.getBBox();
+                const elemCenterX = bbox.x + bbox.width / 2;
+                const elemCenterY = bbox.y + bbox.height / 2;
+                
+                // Rotate around transform center
+                const rotated = this.rotatePoint(elemCenterX, elemCenterY, centerX, centerY, angle);
+                
+                // Calculate new translation
+                const newX = rotated.x - bbox.width / 2;
+                const newY = rotated.y - bbox.height / 2;
+                
+                // Apply transform
+                this.setElementTransform(element, {
+                    x: newX,
+                    y: newY,
+                    rotation: (currentTransform.rotation || 0) + angleDeg
+                });
+            });
+        } else {
+            // Handle scaling
+            const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
+            const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
+            
+            // Calculate scale factors based on handle type
+            let scaleX = 1;
+            let scaleY = 1;
+            
+            const dx = svgPoint.x - this.transformStart.x;
+            const dy = svgPoint.y - this.transformStart.y;
+            
+            // Determine which direction to scale based on handle
+            const handles = {
+                'nw': { x: -1, y: -1 },
+                'n': { x: 0, y: -1 },
+                'ne': { x: 1, y: -1 },
+                'e': { x: 1, y: 0 },
+                'se': { x: 1, y: 1 },
+                's': { x: 0, y: 1 },
+                'sw': { x: -1, y: 1 },
+                'w': { x: -1, y: 0 }
+            };
+            
+            const handle = handles[this.transformHandle];
+            if (handle) {
+                // Calculate distance from center
+                const startDistX = Math.abs(this.transformStart.x - centerX);
+                const startDistY = Math.abs(this.transformStart.y - centerY);
+                
+                const currentDistX = Math.abs(svgPoint.x - centerX);
+                const currentDistY = Math.abs(svgPoint.y - centerY);
+                
+                if (handle.x !== 0 && startDistX > 0) {
+                    scaleX = currentDistX / startDistX;
+                }
+                if (handle.y !== 0 && startDistY > 0) {
+                    scaleY = currentDistY / startDistY;
+                }
+                
+                // Maintain aspect ratio for corner handles (Shift key)
+                if (e.shiftKey && handle.x !== 0 && handle.y !== 0) {
+                    scaleX = scaleY = Math.max(scaleX, scaleY);
+                }
+            }
+            
+            // Apply scaling to all selected elements
+            this.selectedElements.forEach(element => {
+                const bbox = element.getBBox();
+                const elemCenterX = bbox.x + bbox.width / 2;
+                const elemCenterY = bbox.y + bbox.height / 2;
+                
+                // Scale around transform center
+                const newWidth = bbox.width * scaleX;
+                const newHeight = bbox.height * scaleY;
+                
+                // Calculate new position
+                const offsetX = (elemCenterX - centerX) * (scaleX - 1);
+                const offsetY = (elemCenterY - centerY) * (scaleY - 1);
+                
+                const newX = bbox.x + offsetX - (newWidth - bbox.width) / 2;
+                const newY = bbox.y + offsetY - (newHeight - bbox.height) / 2;
+                
+                // Apply scale transform
+                this.scaleElement(element, scaleX, scaleY, centerX, centerY);
+            });
+        }
+        
+        // Update bounding box display
+        this.updateBoundingBox();
+        this.updateTransformPanel();
+    }
+    
+    rotatePoint(x, y, cx, cy, angle) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const dx = x - cx;
+        const dy = y - cy;
+        return {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos
+        };
+    }
+    
+    scaleElement(element, scaleX, scaleY, centerX, centerY) {
+        // For now, use transform attribute
+        const transform = element.getAttribute('transform') || '';
+        
+        // Parse existing transform or create new one
+        // Simple implementation: add scale transform
+        // This is a simplified version - a full implementation would parse the transform matrix
+        
+        const bbox = element.getBBox();
+        const currentX = bbox.x + bbox.width / 2;
+        const currentY = bbox.y + bbox.height / 2;
+        
+        // Create scale transform around center
+        const scaleTransform = `scale(${scaleX}, ${scaleY})`;
+        
+        // Combine with existing transform (simplified - assumes translate comes first)
+        if (transform) {
+            element.setAttribute('transform', `${transform} ${scaleTransform}`);
+        } else {
+            element.setAttribute('transform', scaleTransform);
+        }
+        
+        // Adjust position to maintain center
+        const newBbox = element.getBBox();
+        const newX = currentX - newBbox.width / 2;
+        const newY = currentY - newBbox.height / 2;
+        
+        // This is a simplified approach - full implementation would use transform matrix
+        // For now, we'll use a simpler method that works with translate
+    }
+    
+    getElementTransform(element) {
+        const transform = element.getAttribute('transform') || '';
+        const translateMatch = transform.match(/translate\(([^,]+),([^)]+)\)/);
+        const rotateMatch = transform.match(/rotate\(([^)]+)\)/);
+        
+        return {
+            x: translateMatch ? parseFloat(translateMatch[1]) : 0,
+            y: translateMatch ? parseFloat(translateMatch[2]) : 0,
+            rotation: rotateMatch ? parseFloat(rotateMatch[1]) : 0
+        };
+    }
+    
+    setElementTransform(element, transform) {
+        let transformStr = '';
+        
+        if (transform.x !== undefined || transform.y !== undefined) {
+            transformStr += `translate(${transform.x || 0}, ${transform.y || 0}) `;
+        }
+        
+        if (transform.rotation !== undefined && transform.rotation !== 0) {
+            const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
+            const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
+            transformStr += `rotate(${transform.rotation}, ${centerX}, ${centerY}) `;
+        }
+        
+        if (transform.scaleX !== undefined || transform.scaleY !== undefined) {
+            transformStr += `scale(${transform.scaleX || 1}, ${transform.scaleY || 1}) `;
+        }
+        
+        element.setAttribute('transform', transformStr.trim());
     }
 }
 
