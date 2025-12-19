@@ -34,7 +34,7 @@ class SVGEditor {
         this.transformHandle = null;
         this.transformStart = { x: 0, y: 0 };
         this.transformStartBBox = null;
-        this.transformCenter = { x: 0, y: 0 };
+        this.transformStartStates = new Map();
         
         this.init();
     }
@@ -2056,17 +2056,7 @@ class SVGEditor {
         rect.setAttribute('class', 'bounding-box');
         this.boundingBoxOverlay.appendChild(rect);
         
-        // Store transform center in SVG coordinates
-        this.transformCenter = {
-            x: x + width / 2,
-            y: y + height / 2
-        };
-        
-        // Store in SVG coordinates for transforms
-        this.transformCenterSVG = {
-            x: this.boundingBox.x + this.boundingBox.width / 2,
-            y: this.boundingBox.y + this.boundingBox.height / 2
-        };
+        // Transform center is calculated from boundingBox when needed
         
         // Create resize handles (8 handles: corners and edges)
         const handlePositions = [
@@ -2102,9 +2092,11 @@ class SVGEditor {
         });
         
         // Create rotation handle (above the bounding box)
+        const centerX = x + width / 2;
+        const centerY = y + height / 2;
         const rotationHandleY = y - padding - 30;
         const rotationHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        rotationHandle.setAttribute('cx', this.transformCenter.x);
+        rotationHandle.setAttribute('cx', centerX);
         rotationHandle.setAttribute('cy', rotationHandleY);
         rotationHandle.setAttribute('r', '6');
         rotationHandle.setAttribute('fill', '#ffffff');
@@ -2122,9 +2114,9 @@ class SVGEditor {
         
         // Draw line from center to rotation handle
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', this.transformCenter.x);
-        line.setAttribute('y1', this.transformCenter.y);
-        line.setAttribute('x2', this.transformCenter.x);
+        line.setAttribute('x1', centerX);
+        line.setAttribute('y1', centerY);
+        line.setAttribute('x2', centerX);
         line.setAttribute('y2', rotationHandleY);
         line.setAttribute('stroke', '#ff4081');
         line.setAttribute('stroke-width', '1');
@@ -2154,73 +2146,69 @@ class SVGEditor {
         
         this.transformStartBBox = { ...this.boundingBox };
         
-        // Calculate center point in SVG coordinates
-        const svgRect = this.svgElement.getBoundingClientRect();
-        const svgViewBox = this.svgElement.viewBox.baseVal;
-        const scaleX = svgRect.width / (svgViewBox.width || this.svgElement.clientWidth);
-        const scaleY = svgRect.height / (svgViewBox.height || this.svgElement.clientHeight);
-        
-        this.transformCenter = {
-            x: (this.boundingBox.x + this.boundingBox.width / 2) * scaleX / scaleX,
-            y: (this.boundingBox.y + this.boundingBox.height / 2) * scaleY / scaleY
-        };
+        // Store initial transforms for each element to calculate deltas
+        this.transformStartStates = new Map();
+        this.selectedElements.forEach(element => {
+            this.transformStartStates.set(element, this.getElementTransform(element));
+        });
     }
     
     handleBoundingBoxTransform(e) {
         if (!this.isTransforming || !this.transformHandle || !this.boundingBox) return;
         
-        // Convert mouse position to SVG coordinates
+        // Convert mouse position to SVG root coordinates
         const point = this.svgElement.createSVGPoint();
         point.x = e.clientX;
         point.y = e.clientY;
         const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
         
+        // Transform center in root SVG coordinates
+        const centerRootX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
+        const centerRootY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
+        
         if (this.transformHandle === 'rotate') {
-            // Handle rotation
-            const dx = svgPoint.x - (this.transformStartBBox.x + this.transformStartBBox.width / 2);
-            const dy = svgPoint.y - (this.transformStartBBox.y + this.transformStartBBox.height / 2);
-            const startDx = this.transformStart.x - (this.transformStartBBox.x + this.transformStartBBox.width / 2);
-            const startDy = this.transformStart.y - (this.transformStartBBox.y + this.transformStartBBox.height / 2);
+            // Calculate rotation angle
+            const dx = svgPoint.x - centerRootX;
+            const dy = svgPoint.y - centerRootY;
+            const startDx = this.transformStart.x - centerRootX;
+            const startDy = this.transformStart.y - centerRootY;
             
             const angle = Math.atan2(dy, dx) - Math.atan2(startDy, startDx);
             const angleDeg = angle * (180 / Math.PI);
             
             // Apply rotation to all selected elements
             this.selectedElements.forEach(element => {
+                // Convert center from root coordinates to element-local coordinates
+                const centerLocal = this.toLocalCoords(element, centerRootX, centerRootY);
+                
+                // Get initial transform state
+                const initialTransform = this.transformStartStates.get(element) || {};
+                const initialRotation = initialTransform.rotation || 0;
+                
+                // Calculate new rotation relative to initial state
+                const newRotation = initialRotation + angleDeg;
+                
+                // Get other transform values to preserve them
                 const currentTransform = this.getElementTransform(element);
-                const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
-                const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
                 
-                // Get element's center relative to transform center
-                const bbox = element.getBBox();
-                const elemCenterX = bbox.x + bbox.width / 2;
-                const elemCenterY = bbox.y + bbox.height / 2;
-                
-                // Rotate around transform center
-                const rotated = this.rotatePoint(elemCenterX, elemCenterY, centerX, centerY, angle);
-                
-                // Calculate new translation
-                const newX = rotated.x - bbox.width / 2;
-                const newY = rotated.y - bbox.height / 2;
-                
-                // Apply transform
+                // Apply rotation about the center point (in element-local coords)
                 this.setElementTransform(element, {
-                    x: newX,
-                    y: newY,
-                    rotation: (currentTransform.rotation || 0) + angleDeg
+                    x: currentTransform.x,
+                    y: currentTransform.y,
+                    rotation: newRotation,
+                    rotationCenterX: centerLocal.x,
+                    rotationCenterY: centerLocal.y,
+                    scaleX: currentTransform.scaleX,
+                    scaleY: currentTransform.scaleY,
+                    scaleCenterX: currentTransform.scaleCenterX,
+                    scaleCenterY: currentTransform.scaleCenterY
                 });
             });
         } else {
             // Handle scaling
-            const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
-            const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
-            
             // Calculate scale factors based on handle type
             let scaleX = 1;
             let scaleY = 1;
-            
-            const dx = svgPoint.x - this.transformStart.x;
-            const dy = svgPoint.y - this.transformStart.y;
             
             // Determine which direction to scale based on handle
             const handles = {
@@ -2236,12 +2224,12 @@ class SVGEditor {
             
             const handle = handles[this.transformHandle];
             if (handle) {
-                // Calculate distance from center
-                const startDistX = Math.abs(this.transformStart.x - centerX);
-                const startDistY = Math.abs(this.transformStart.y - centerY);
+                // Calculate distance from center in root coordinates
+                const startDistX = Math.abs(this.transformStart.x - centerRootX);
+                const startDistY = Math.abs(this.transformStart.y - centerRootY);
                 
-                const currentDistX = Math.abs(svgPoint.x - centerX);
-                const currentDistY = Math.abs(svgPoint.y - centerY);
+                const currentDistX = Math.abs(svgPoint.x - centerRootX);
+                const currentDistY = Math.abs(svgPoint.y - centerRootY);
                 
                 if (handle.x !== 0 && startDistX > 0) {
                     scaleX = currentDistX / startDistX;
@@ -2258,23 +2246,33 @@ class SVGEditor {
             
             // Apply scaling to all selected elements
             this.selectedElements.forEach(element => {
-                const bbox = element.getBBox();
-                const elemCenterX = bbox.x + bbox.width / 2;
-                const elemCenterY = bbox.y + bbox.height / 2;
+                // Convert center from root coordinates to element-local coordinates
+                const centerLocal = this.toLocalCoords(element, centerRootX, centerRootY);
                 
-                // Scale around transform center
-                const newWidth = bbox.width * scaleX;
-                const newHeight = bbox.height * scaleY;
+                // Get initial transform state
+                const initialTransform = this.transformStartStates.get(element) || {};
+                const initialScaleX = initialTransform.scaleX || 1;
+                const initialScaleY = initialTransform.scaleY || 1;
                 
-                // Calculate new position
-                const offsetX = (elemCenterX - centerX) * (scaleX - 1);
-                const offsetY = (elemCenterY - centerY) * (scaleY - 1);
+                // Calculate new scale relative to initial state
+                const newScaleX = initialScaleX * scaleX;
+                const newScaleY = initialScaleY * scaleY;
                 
-                const newX = bbox.x + offsetX - (newWidth - bbox.width) / 2;
-                const newY = bbox.y + offsetY - (newHeight - bbox.height) / 2;
+                // Get other transform values to preserve them
+                const currentTransform = this.getElementTransform(element);
                 
-                // Apply scale transform
-                this.scaleElement(element, scaleX, scaleY, centerX, centerY);
+                // Apply scale about the center point (in element-local coords)
+                this.setElementTransform(element, {
+                    x: currentTransform.x,
+                    y: currentTransform.y,
+                    rotation: currentTransform.rotation,
+                    rotationCenterX: currentTransform.rotationCenterX,
+                    rotationCenterY: currentTransform.rotationCenterY,
+                    scaleX: newScaleX,
+                    scaleY: newScaleY,
+                    scaleCenterX: centerLocal.x,
+                    scaleCenterY: centerLocal.y
+                });
             });
         }
         
@@ -2294,64 +2292,56 @@ class SVGEditor {
         };
     }
     
-    scaleElement(element, scaleX, scaleY, centerX, centerY) {
-        // For now, use transform attribute
-        const transform = element.getAttribute('transform') || '';
-        
-        // Parse existing transform or create new one
-        // Simple implementation: add scale transform
-        // This is a simplified version - a full implementation would parse the transform matrix
-        
-        const bbox = element.getBBox();
-        const currentX = bbox.x + bbox.width / 2;
-        const currentY = bbox.y + bbox.height / 2;
-        
-        // Create scale transform around center
-        const scaleTransform = `scale(${scaleX}, ${scaleY})`;
-        
-        // Combine with existing transform (simplified - assumes translate comes first)
-        if (transform) {
-            element.setAttribute('transform', `${transform} ${scaleTransform}`);
-        } else {
-            element.setAttribute('transform', scaleTransform);
-        }
-        
-        // Adjust position to maintain center
-        const newBbox = element.getBBox();
-        const newX = currentX - newBbox.width / 2;
-        const newY = currentY - newBbox.height / 2;
-        
-        // This is a simplified approach - full implementation would use transform matrix
-        // For now, we'll use a simpler method that works with translate
-    }
-    
     getElementTransform(element) {
         const transform = element.getAttribute('transform') || '';
         const translateMatch = transform.match(/translate\(([^,]+),([^)]+)\)/);
-        const rotateMatch = transform.match(/rotate\(([^)]+)\)/);
+        const rotateMatch = transform.match(/rotate\(([^,\s)]+)(?:,\s*([^,\s)]+),\s*([^)\s)]+))?\)/);
+        const scaleMatch = transform.match(/scale\(([^,\s)]+)(?:,\s*([^)\s)]+))?\)/);
         
         return {
             x: translateMatch ? parseFloat(translateMatch[1]) : 0,
             y: translateMatch ? parseFloat(translateMatch[2]) : 0,
-            rotation: rotateMatch ? parseFloat(rotateMatch[1]) : 0
+            rotation: rotateMatch ? parseFloat(rotateMatch[1]) : 0,
+            rotationCenterX: rotateMatch && rotateMatch[2] ? parseFloat(rotateMatch[2]) : undefined,
+            rotationCenterY: rotateMatch && rotateMatch[3] ? parseFloat(rotateMatch[3]) : undefined,
+            scaleX: scaleMatch ? parseFloat(scaleMatch[1]) : 1,
+            scaleY: scaleMatch && scaleMatch[2] ? parseFloat(scaleMatch[2]) : (scaleMatch ? parseFloat(scaleMatch[1]) : 1)
         };
     }
     
     setElementTransform(element, transform) {
         let transformStr = '';
         
+        // Build transform string in correct order: translate, rotate, scale
+        // This ensures transforms are applied in the right sequence
+        
+        // Translation
         if (transform.x !== undefined || transform.y !== undefined) {
             transformStr += `translate(${transform.x || 0}, ${transform.y || 0}) `;
         }
         
+        // Rotation (with optional center point)
         if (transform.rotation !== undefined && transform.rotation !== 0) {
-            const centerX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
-            const centerY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
-            transformStr += `rotate(${transform.rotation}, ${centerX}, ${centerY}) `;
+            if (transform.rotationCenterX !== undefined && transform.rotationCenterY !== undefined) {
+                transformStr += `rotate(${transform.rotation}, ${transform.rotationCenterX}, ${transform.rotationCenterY}) `;
+            } else {
+                transformStr += `rotate(${transform.rotation}) `;
+            }
         }
         
+        // Scale (with optional center point via translate before/after)
         if (transform.scaleX !== undefined || transform.scaleY !== undefined) {
-            transformStr += `scale(${transform.scaleX || 1}, ${transform.scaleY || 1}) `;
+            const scaleX = transform.scaleX !== undefined ? transform.scaleX : 1;
+            const scaleY = transform.scaleY !== undefined ? transform.scaleY : 1;
+            
+            if (transform.scaleCenterX !== undefined && transform.scaleCenterY !== undefined) {
+                // Scale about a point: translate(-cx, -cy) scale(sx, sy) translate(cx, cy)
+                transformStr += `translate(${-transform.scaleCenterX}, ${-transform.scaleCenterY}) `;
+                transformStr += `scale(${scaleX}, ${scaleY}) `;
+                transformStr += `translate(${transform.scaleCenterX}, ${transform.scaleCenterY}) `;
+            } else {
+                transformStr += `scale(${scaleX}, ${scaleY}) `;
+            }
         }
         
         element.setAttribute('transform', transformStr.trim());
