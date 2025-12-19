@@ -21,9 +21,32 @@
                         <span>Save</span>
                         <span class="menu-shortcut">Ctrl+S</span>
                     </div>
+                    <div class="menu-option" id="settingsBtn">
+                        <span>Settings...</span>
+                    </div>
                 </div>
             </div>
         </header>
+        
+        <!-- Settings Dialog -->
+        <div id="settingsDialog" class="dialog-overlay" style="display: none;">
+            <div class="dialog">
+                <div class="dialog-header">
+                    <h3>Settings</h3>
+                    <button class="dialog-close" id="settingsDialogClose">×</button>
+                </div>
+                <div class="dialog-content">
+                    <div class="dialog-field">
+                        <label for="dpiInput">DPI (Dots Per Inch):</label>
+                        <input type="number" id="dpiInput" class="dialog-input" value="96" min="1" max="600">
+                    </div>
+                    <div class="dialog-actions">
+                        <button id="settingsCancelBtn" class="dialog-button">Cancel</button>
+                        <button id="settingsSaveBtn" class="dialog-button dialog-button-primary">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <div class="control-panel">
             <div class="control-group" id="pathControls" style="display: none;">
@@ -80,6 +103,42 @@
                     </div>
                 </div>
             </main>
+            
+            <aside class="toolbar-panel">
+                <div class="toolbar-button" id="transformToolButton" title="Transform">
+                    <svg class="toolbar-icon" viewBox="0 0 24 24" width="20" height="20">
+                        <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+                        <path d="M2 7l10 5M12 12l10-5M12 12v10M2 17l10 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                
+                <div class="tool-panel" id="transformPanel">
+                    <div class="tool-panel-header">
+                        <span class="tool-panel-title">Transform</span>
+                        <button class="tool-panel-close" id="transformPanelClose" title="Close">×</button>
+                    </div>
+                    <div class="tool-panel-content">
+                        <div class="transform-group">
+                            <label class="transform-label">Units:</label>
+                            <select id="transformUnit" class="transform-select">
+                                <option value="px">px</option>
+                                <option value="mm">mm</option>
+                                <option value="in">in</option>
+                            </select>
+                        </div>
+                        <div class="transform-group">
+                            <label class="transform-label">W:</label>
+                            <input type="number" id="transformWidth" class="transform-input" readonly>
+                            <span class="transform-unit-label" id="transformWidthUnit">px</span>
+                        </div>
+                        <div class="transform-group">
+                            <label class="transform-label">H:</label>
+                            <input type="number" id="transformHeight" class="transform-input" readonly>
+                            <span class="transform-unit-label" id="transformHeightUnit">px</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
             
             <aside class="layers-panel">
                 <h3>Layers</h3>

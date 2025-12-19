@@ -15,6 +15,10 @@ class SVGEditor {
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
+        // Load DPI from localStorage or use default (96 DPI is standard)
+        this.dpi = parseFloat(localStorage.getItem('svgEditorDPI')) || 96;
+        this.transformUnit = localStorage.getItem('svgEditorTransformUnit') || 'px';
+        
         this.init();
     }
     
@@ -34,6 +38,13 @@ class SVGEditor {
         document.getElementById('saveBtn').addEventListener('click', (e) => {
             e.stopPropagation();
             this.saveSVG();
+            this.closeMenus();
+        });
+        
+        // Setup settings button
+        document.getElementById('settingsBtn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.openSettingsDialog();
             this.closeMenus();
         });
         
@@ -57,6 +68,12 @@ class SVGEditor {
         
         // Setup keyboard shortcuts
         this.setupKeyboardShortcuts();
+        
+        // Setup transform panel
+        this.setupTransformPanel();
+        
+        // Setup settings dialog
+        this.setupSettingsDialog();
     }
     
     setupTooltips() {
@@ -731,6 +748,9 @@ class SVGEditor {
                 this.currentDraggedNode.index, 
                 svgPoint.x, 
                 svgPoint.y);
+            
+            // Update transform panel during node dragging (shape may change)
+            this.updateTransformPanel();
         }
     }
     
@@ -772,6 +792,9 @@ class SVGEditor {
         
         // Update control panel when selection changes
         this.updateControlPanel();
+        
+        // Update transform panel when selection changes
+        this.updateTransformPanel();
     }
     
     clearSelection() {
@@ -781,6 +804,7 @@ class SVGEditor {
         this.selectedElements.clear();
         this.clearNodeHandles();
         this.updateControlPanel();
+        this.updateTransformPanel();
     }
     
     getElementTransform(element) {
@@ -1532,6 +1556,224 @@ class SVGEditor {
                 });
             }
         });
+    }
+    
+    setupTransformPanel() {
+        const transformButton = document.getElementById('transformToolButton');
+        const transformPanel = document.getElementById('transformPanel');
+        const transformPanelClose = document.getElementById('transformPanelClose');
+        const transformUnitSelect = document.getElementById('transformUnit');
+        
+        // Set initial unit from saved preference
+        transformUnitSelect.value = this.transformUnit;
+        
+        // Update unit labels when unit changes
+        transformUnitSelect.addEventListener('change', (e) => {
+            this.transformUnit = e.target.value;
+            localStorage.setItem('svgEditorTransformUnit', this.transformUnit);
+            this.updateTransformPanel();
+        });
+        
+        // Toggle transform panel when button is clicked
+        transformButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isActive = transformPanel.classList.contains('active');
+            if (isActive) {
+                transformPanel.classList.remove('active');
+                transformButton.classList.remove('active');
+            } else {
+                transformPanel.classList.add('active');
+                transformButton.classList.add('active');
+                // Update the panel with current selection
+                this.updateTransformPanel();
+            }
+        });
+        
+        // Close panel when close button is clicked
+        transformPanelClose.addEventListener('click', (e) => {
+            e.stopPropagation();
+            transformPanel.classList.remove('active');
+            transformButton.classList.remove('active');
+        });
+        
+        // Close panel when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.toolbar-panel')) {
+                transformPanel.classList.remove('active');
+                transformButton.classList.remove('active');
+            }
+        });
+    }
+    
+    updateTransformPanel() {
+        const transformPanel = document.getElementById('transformPanel');
+        const widthInput = document.getElementById('transformWidth');
+        const heightInput = document.getElementById('transformHeight');
+        const widthUnitLabel = document.getElementById('transformWidthUnit');
+        const heightUnitLabel = document.getElementById('transformHeightUnit');
+        
+        // Update unit labels
+        const unitLabel = this.getUnitLabel(this.transformUnit);
+        widthUnitLabel.textContent = unitLabel;
+        heightUnitLabel.textContent = unitLabel;
+        
+        // Only update if panel is visible
+        if (!transformPanel.classList.contains('active')) {
+            return;
+        }
+        
+        if (this.selectedElements.size === 0) {
+            widthInput.value = '';
+            heightInput.value = '';
+            return;
+        }
+        
+        // If multiple elements selected, calculate combined bounding box
+        if (this.selectedElements.size === 1) {
+            // Single element - get its bounding box
+            const element = Array.from(this.selectedElements)[0];
+            try {
+                const bbox = element.getBBox();
+                const widthPx = bbox.width;
+                const heightPx = bbox.height;
+                
+                // Convert to selected unit
+                const width = this.convertPixels(widthPx, this.transformUnit);
+                const height = this.convertPixels(heightPx, this.transformUnit);
+                
+                widthInput.value = width.toFixed(2);
+                heightInput.value = height.toFixed(2);
+            } catch (e) {
+                // Element might not be in the DOM or might not support getBBox
+                widthInput.value = '';
+                heightInput.value = '';
+            }
+        } else {
+            // Multiple elements - calculate combined bounding box
+            try {
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                
+                this.selectedElements.forEach(element => {
+                    try {
+                        const bbox = element.getBBox();
+                        minX = Math.min(minX, bbox.x);
+                        minY = Math.min(minY, bbox.y);
+                        maxX = Math.max(maxX, bbox.x + bbox.width);
+                        maxY = Math.max(maxY, bbox.y + bbox.height);
+                    } catch (e) {
+                        // Skip elements that don't support getBBox
+                    }
+                });
+                
+                if (minX !== Infinity && minY !== Infinity) {
+                    const widthPx = maxX - minX;
+                    const heightPx = maxY - minY;
+                    
+                    // Convert to selected unit
+                    const width = this.convertPixels(widthPx, this.transformUnit);
+                    const height = this.convertPixels(heightPx, this.transformUnit);
+                    
+                    widthInput.value = width.toFixed(2);
+                    heightInput.value = height.toFixed(2);
+                } else {
+                    widthInput.value = '';
+                    heightInput.value = '';
+                }
+            } catch (e) {
+                widthInput.value = '';
+                heightInput.value = '';
+            }
+        }
+    }
+    
+    setupSettingsDialog() {
+        const settingsDialog = document.getElementById('settingsDialog');
+        const settingsDialogClose = document.getElementById('settingsDialogClose');
+        const settingsCancelBtn = document.getElementById('settingsCancelBtn');
+        const settingsSaveBtn = document.getElementById('settingsSaveBtn');
+        const dpiInput = document.getElementById('dpiInput');
+        
+        // Close dialog handlers
+        const closeDialog = () => {
+            settingsDialog.style.display = 'none';
+        };
+        
+        settingsDialogClose.addEventListener('click', closeDialog);
+        settingsCancelBtn.addEventListener('click', closeDialog);
+        
+        // Close on overlay click
+        settingsDialog.addEventListener('click', (e) => {
+            if (e.target === settingsDialog) {
+                closeDialog();
+            }
+        });
+        
+        // Save settings
+        settingsSaveBtn.addEventListener('click', () => {
+            const dpi = parseFloat(dpiInput.value);
+            if (dpi && dpi > 0 && dpi <= 600) {
+                this.dpi = dpi;
+                localStorage.setItem('svgEditorDPI', dpi.toString());
+                closeDialog();
+                // Update transform panel if it's open
+                this.updateTransformPanel();
+            } else {
+                alert('Please enter a valid DPI value between 1 and 600');
+            }
+        });
+        
+        // Escape key to close
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && settingsDialog.style.display !== 'none') {
+                closeDialog();
+            }
+        });
+    }
+    
+    openSettingsDialog() {
+        const settingsDialog = document.getElementById('settingsDialog');
+        const dpiInput = document.getElementById('dpiInput');
+        dpiInput.value = this.dpi;
+        settingsDialog.style.display = 'flex';
+        dpiInput.focus();
+        dpiInput.select();
+    }
+    
+    // Conversion functions
+    pixelsToInches(pixels) {
+        return pixels / this.dpi;
+    }
+    
+    pixelsToMillimeters(pixels) {
+        // 1 inch = 25.4 mm
+        return (pixels / this.dpi) * 25.4;
+    }
+    
+    convertPixels(pixels, unit) {
+        switch (unit) {
+            case 'px':
+                return pixels;
+            case 'in':
+                return this.pixelsToInches(pixels);
+            case 'mm':
+                return this.pixelsToMillimeters(pixels);
+            default:
+                return pixels;
+        }
+    }
+    
+    getUnitLabel(unit) {
+        switch (unit) {
+            case 'px':
+                return 'px';
+            case 'in':
+                return 'in';
+            case 'mm':
+                return 'mm';
+            default:
+                return 'px';
+        }
     }
 }
 
