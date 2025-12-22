@@ -1942,36 +1942,8 @@ class SVGEditor {
             // Handle different element types
             const tagName = element.tagName.toLowerCase();
             
-            switch (tagName) {
-                case 'path':
-                    this.scalePath(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'rect':
-                    this.scaleRect(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'circle':
-                    this.scaleCircle(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'ellipse':
-                    this.scaleEllipse(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'line':
-                    this.scaleLine(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'polyline':
-                case 'polygon':
-                    this.scalePolyline(element, centerX, centerY, scaleFactor);
-                    break;
-                case 'text':
-                    this.scaleText(element, centerX, centerY, scaleFactor);
-                    break;
-                default:
-                    // Unsupported element type, restore transform
-                    if (savedTransform) {
-                        element.setAttribute('transform', savedTransform);
-                    }
-                    return;
-            }
+            // Use uniform scaling for transform panel input
+            this.scaleElementCoordinates(element, centerX, centerY, scaleFactor, scaleFactor);
             
             // Remove transform since we've scaled the coordinates directly
             //element.removeAttribute('transform');
@@ -1982,7 +1954,40 @@ class SVGEditor {
         this.updateTransformPanel();
     }
     
-    scalePath(element, centerX, centerY, scaleFactor) {
+    scaleElementCoordinates(element, centerX, centerY, scaleX, scaleY) {
+        // Route to appropriate scaling function based on element type
+        const tagName = element.tagName.toLowerCase();
+        
+        switch (tagName) {
+            case 'path':
+                this.scalePath(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'rect':
+                this.scaleRect(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'circle':
+                this.scaleCircle(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'ellipse':
+                this.scaleEllipse(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'line':
+                this.scaleLine(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'polyline':
+            case 'polygon':
+                this.scalePolyline(element, centerX, centerY, scaleX, scaleY);
+                break;
+            case 'text':
+                this.scaleText(element, centerX, centerY, scaleX, scaleY);
+                break;
+            default:
+                // Unsupported element type
+                return;
+        }
+    }
+    
+    scalePath(element, centerX, centerY, scaleX, scaleY) {
         const pathData = element.getAttribute('d');
         if (!pathData) return;
         
@@ -1991,20 +1996,20 @@ class SVGEditor {
         // Scale all coordinates about the center
         commands.forEach(cmd => {
             if (cmd.type === 'M' || cmd.type === 'L') {
-                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                cmd.x = centerX + (cmd.x - centerX) * scaleX;
+                cmd.y = centerY + (cmd.y - centerY) * scaleY;
             } else if (cmd.type === 'C') {
-                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
-                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
-                cmd.x2 = centerX + (cmd.x2 - centerX) * scaleFactor;
-                cmd.y2 = centerY + (cmd.y2 - centerY) * scaleFactor;
-                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleX;
+                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleY;
+                cmd.x2 = centerX + (cmd.x2 - centerX) * scaleX;
+                cmd.y2 = centerY + (cmd.y2 - centerY) * scaleY;
+                cmd.x = centerX + (cmd.x - centerX) * scaleX;
+                cmd.y = centerY + (cmd.y - centerY) * scaleY;
             } else if (cmd.type === 'Q') {
-                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
-                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
-                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleX;
+                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleY;
+                cmd.x = centerX + (cmd.x - centerX) * scaleX;
+                cmd.y = centerY + (cmd.y - centerY) * scaleY;
             }
         });
         
@@ -2012,17 +2017,17 @@ class SVGEditor {
         element.setAttribute('d', newPathData);
     }
     
-    scaleRect(element, centerX, centerY, scaleFactor) {
+    scaleRect(element, centerX, centerY, scaleX, scaleY) {
         const x = parseFloat(element.getAttribute('x') || 0);
         const y = parseFloat(element.getAttribute('y') || 0);
         const width = parseFloat(element.getAttribute('width') || 0);
         const height = parseFloat(element.getAttribute('height') || 0);
         
         // Scale position and size
-        const newX = centerX + (x - centerX) * scaleFactor;
-        const newY = centerY + (y - centerY) * scaleFactor;
-        const newWidth = width * scaleFactor;
-        const newHeight = height * scaleFactor;
+        const newX = centerX + (x - centerX) * scaleX;
+        const newY = centerY + (y - centerY) * scaleY;
+        const newWidth = width * scaleX;
+        const newHeight = height * scaleY;
         
         element.setAttribute('x', newX);
         element.setAttribute('y', newY);
@@ -2030,32 +2035,35 @@ class SVGEditor {
         element.setAttribute('height', newHeight);
     }
     
-    scaleCircle(element, centerX, centerY, scaleFactor) {
+    scaleCircle(element, centerX, centerY, scaleX, scaleY) {
         const cx = parseFloat(element.getAttribute('cx') || 0);
         const cy = parseFloat(element.getAttribute('cy') || 0);
         const r = parseFloat(element.getAttribute('r') || 0);
         
+        // For circles, use average of scaleX and scaleY to maintain circular shape
+        const avgScale = (scaleX + scaleY) / 2;
+        
         // Scale center position and radius
-        const newCx = centerX + (cx - centerX) * scaleFactor;
-        const newCy = centerY + (cy - centerY) * scaleFactor;
-        const newR = r * scaleFactor;
+        const newCx = centerX + (cx - centerX) * scaleX;
+        const newCy = centerY + (cy - centerY) * scaleY;
+        const newR = r * avgScale;
         
         element.setAttribute('cx', newCx);
         element.setAttribute('cy', newCy);
         element.setAttribute('r', newR);
     }
     
-    scaleEllipse(element, centerX, centerY, scaleFactor) {
+    scaleEllipse(element, centerX, centerY, scaleX, scaleY) {
         const cx = parseFloat(element.getAttribute('cx') || 0);
         const cy = parseFloat(element.getAttribute('cy') || 0);
         const rx = parseFloat(element.getAttribute('rx') || 0);
         const ry = parseFloat(element.getAttribute('ry') || 0);
         
         // Scale center position and radii
-        const newCx = centerX + (cx - centerX) * scaleFactor;
-        const newCy = centerY + (cy - centerY) * scaleFactor;
-        const newRx = rx * scaleFactor;
-        const newRy = ry * scaleFactor;
+        const newCx = centerX + (cx - centerX) * scaleX;
+        const newCy = centerY + (cy - centerY) * scaleY;
+        const newRx = rx * scaleX;
+        const newRy = ry * scaleY;
         
         element.setAttribute('cx', newCx);
         element.setAttribute('cy', newCy);
@@ -2063,17 +2071,17 @@ class SVGEditor {
         element.setAttribute('ry', newRy);
     }
     
-    scaleLine(element, centerX, centerY, scaleFactor) {
+    scaleLine(element, centerX, centerY, scaleX, scaleY) {
         const x1 = parseFloat(element.getAttribute('x1') || 0);
         const y1 = parseFloat(element.getAttribute('y1') || 0);
         const x2 = parseFloat(element.getAttribute('x2') || 0);
         const y2 = parseFloat(element.getAttribute('y2') || 0);
         
         // Scale both endpoints about the center
-        const newX1 = centerX + (x1 - centerX) * scaleFactor;
-        const newY1 = centerY + (y1 - centerY) * scaleFactor;
-        const newX2 = centerX + (x2 - centerX) * scaleFactor;
-        const newY2 = centerY + (y2 - centerY) * scaleFactor;
+        const newX1 = centerX + (x1 - centerX) * scaleX;
+        const newY1 = centerY + (y1 - centerY) * scaleY;
+        const newX2 = centerX + (x2 - centerX) * scaleX;
+        const newY2 = centerY + (y2 - centerY) * scaleY;
         
         element.setAttribute('x1', newX1);
         element.setAttribute('y1', newY1);
@@ -2081,7 +2089,7 @@ class SVGEditor {
         element.setAttribute('y2', newY2);
     }
     
-    scalePolyline(element, centerX, centerY, scaleFactor) {
+    scalePolyline(element, centerX, centerY, scaleX, scaleY) {
         const pointsAttr = element.getAttribute('points');
         if (!pointsAttr) return;
         
@@ -2094,8 +2102,8 @@ class SVGEditor {
             const y = points[i + 1];
             if (isNaN(x) || isNaN(y)) continue;
             
-            const newX = centerX + (x - centerX) * scaleFactor;
-            const newY = centerY + (y - centerY) * scaleFactor;
+            const newX = centerX + (x - centerX) * scaleX;
+            const newY = centerY + (y - centerY) * scaleY;
             scaledPoints.push(newX, newY);
         }
         
@@ -2107,7 +2115,7 @@ class SVGEditor {
         element.setAttribute('points', newPoints.join(' '));
     }
     
-    scaleText(element, centerX, centerY, scaleFactor) {
+    scaleText(element, centerX, centerY, scaleX, scaleY) {
         // Scale x and y position attributes
         const xAttr = element.getAttribute('x');
         const yAttr = element.getAttribute('y');
@@ -2116,7 +2124,7 @@ class SVGEditor {
             const xValues = xAttr.split(/[\s,]+/).map(val => {
                 const x = parseFloat(val);
                 if (isNaN(x)) return val;
-                return centerX + (x - centerX) * scaleFactor;
+                return centerX + (x - centerX) * scaleX;
             });
             element.setAttribute('x', xValues.join(' '));
         }
@@ -2125,17 +2133,18 @@ class SVGEditor {
             const yValues = yAttr.split(/[\s,]+/).map(val => {
                 const y = parseFloat(val);
                 if (isNaN(y)) return val;
-                return centerY + (y - centerY) * scaleFactor;
+                return centerY + (y - centerY) * scaleY;
             });
             element.setAttribute('y', yValues.join(' '));
         }
         
-        // Also scale font-size if present
+        // Also scale font-size if present (use average scale for font size)
         const fontSize = element.getAttribute('font-size');
         if (fontSize) {
             const size = parseFloat(fontSize);
             if (!isNaN(size)) {
-                element.setAttribute('font-size', size * scaleFactor);
+                const avgScale = (scaleX + scaleY) / 2;
+                element.setAttribute('font-size', size * avgScale);
             }
         }
     }
@@ -2540,36 +2549,29 @@ class SVGEditor {
                 }
             }
             
-            // Apply scaling to all selected elements
+            // Apply scaling to all selected elements using coordinate-level scaling
+            // This uses the same function as the transform panel input
             this.selectedElements.forEach(element => {
-                // Use the stored center point in element-local coordinates (untransformed)
-                // This matches the coordinate strategy used by direct select node handles
-                const centerLocal = this.transformStartCenters.get(element) || { x: centerRootX, y: centerRootY };
+                // Get the center point in element's local coordinates (untransformed)
+                let centerLocal = this.transformStartCenters.get(element);
                 
-                // Get initial transform state
-                const initialTransform = this.transformStartStates.get(element) || {};
-                const initialScaleX = initialTransform.scaleX || 1;
-                const initialScaleY = initialTransform.scaleY || 1;
+                if (!centerLocal) {
+                    // Fallback: get center from current bounding box
+                    try {
+                        const bbox = element.getBBox();
+                        centerLocal = {
+                            x: bbox.x + bbox.width / 2,
+                            y: bbox.y + bbox.height / 2
+                        };
+                    } catch (e) {
+                        // Skip this element if we can't get its bbox
+                        return;
+                    }
+                }
                 
-                // Calculate new scale relative to initial state
-                const newScaleX = initialScaleX * scaleX;
-                const newScaleY = initialScaleY * scaleY;
-                
-                // Get other transform values to preserve them
-                const currentTransform = this.getElementTransform(element);
-                
-                // Apply scale about the center point (in element-local coords)
-                this.setElementTransform(element, {
-                    x: currentTransform.x,
-                    y: currentTransform.y,
-                    rotation: currentTransform.rotation,
-                    rotationCenterX: currentTransform.rotationCenterX,
-                    rotationCenterY: currentTransform.rotationCenterY,
-                    scaleX: newScaleX,
-                    scaleY: newScaleY,
-                    scaleCenterX: centerLocal.x,
-                    scaleCenterY: centerLocal.y
-                });
+                // Use the coordinate-level scaling function (same as transform panel)
+                // This preserves existing transforms and scales coordinates directly
+                this.scaleElementCoordinates(element, centerLocal.x, centerLocal.y, scaleX, scaleY);
             });
         }
         
