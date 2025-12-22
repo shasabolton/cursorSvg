@@ -1753,7 +1753,6 @@ class SVGEditor {
     }
     
     setupTransformPanel() {
-        "setupTransformPanelV1";
         const transformButton = document.getElementById('transformToolButton');
         const transformPanel = document.getElementById('transformPanel');
         const transformPanelClose = document.getElementById('transformPanelClose');
@@ -1805,10 +1804,6 @@ class SVGEditor {
             if (e.key === 'Enter') {
                 if (this.isUpdatingScaleInput) return;
                 e.preventDefault();
-                const scalePercent = parseFloat(e.target.value);
-                if (!isNaN(scalePercent) && scalePercent > 0) {
-                    //this.applyScaleFromInput(scalePercent / 100);
-                }
                 // Blur the input after applying
                 e.target.blur();
             }
