@@ -1930,26 +1930,14 @@ class SVGEditor {
         // Apply scale to all selected elements by modifying coordinates directly
         this.selectedElements.forEach(element => {
             // Temporarily remove transform to get untransformed bounding box and center
-            const savedTransform = element.getAttribute('transform') || '';
-            let centerX, centerY;
             
-            try {
-                if (savedTransform) {
-                    //element.removeAttribute('transform');
-                }
+            let centerX, centerY;
                 
-                // Get bounding box in untransformed local coordinates
-                const bbox = element.getBBox();
-                centerX = bbox.x + bbox.width / 2;
-                centerY = bbox.y + bbox.height / 2;
-            } catch (e) {
-                // Restore transform if getBBox fails
-                if (savedTransform) {
-                    element.setAttribute('transform', savedTransform);
-                }
-                console.warn('Could not get bounding box for element:', e);
-                return;
-            }
+            // Get bounding box in untransformed local coordinates
+            const bbox = element.getBBox();
+            centerX = bbox.x + bbox.width / 2;
+            centerY = bbox.y + bbox.height / 2;
+           
             
             // Handle different element types
             const tagName = element.tagName.toLowerCase();
