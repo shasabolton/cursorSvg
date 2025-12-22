@@ -35,6 +35,8 @@ class SVGEditor {
         this.transformStart = { x: 0, y: 0 };
         this.transformStartBBox = null;
         this.transformStartStates = new Map();
+        this.transformStartCenters = new Map(); // Store center in element-local coords
+        this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
         this.init();
     }
@@ -1795,12 +1797,37 @@ class SVGEditor {
                 transformButton.classList.remove('active');
             }
         });
+        
+        // Handle scale input changes - only apply on blur or Enter key
+        const scaleInput = document.getElementById('transformScale');
+        scaleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                if (this.isUpdatingScaleInput) return;
+                e.preventDefault();
+                const scalePercent = parseFloat(e.target.value);
+                if (!isNaN(scalePercent) && scalePercent > 0) {
+                    this.applyScaleFromInput(scalePercent / 100);
+                }
+                // Blur the input after applying
+                e.target.blur();
+            }
+        });
+        
+        // Apply scale on blur (when input loses focus)
+        scaleInput.addEventListener('blur', (e) => {
+            if (this.isUpdatingScaleInput) return;
+            const scalePercent = parseFloat(e.target.value);
+            if (!isNaN(scalePercent) && scalePercent > 0) {
+                this.applyScaleFromInput(scalePercent / 100);
+            }
+        });
     }
     
     updateTransformPanel() {
         const transformPanel = document.getElementById('transformPanel');
         const widthInput = document.getElementById('transformWidth');
         const heightInput = document.getElementById('transformHeight');
+        const scaleInput = document.getElementById('transformScale');
         const widthUnitLabel = document.getElementById('transformWidthUnit');
         const heightUnitLabel = document.getElementById('transformHeightUnit');
         
@@ -1817,7 +1844,29 @@ class SVGEditor {
         if (this.selectedElements.size === 0) {
             widthInput.value = '';
             heightInput.value = '';
+            scaleInput.value = '';
             return;
+        }
+        
+        // Don't update scale input if it's currently focused (user is typing)
+        // Since we're modifying coordinates directly, there's no transform-based scale to display
+        // The scale input is user-editable, so we preserve whatever the user typed
+        if (document.activeElement !== scaleInput) {
+            this.isUpdatingScaleInput = true;
+            try {
+                if (this.selectedElements.size === 1) {
+                    // Since coordinates are modified directly, there's no scale transform
+                    // Only update if the field is empty (initial load)
+                    if (!scaleInput.value || scaleInput.value === '') {
+                        scaleInput.value = '100.0';
+                    }
+                } else {
+                    // For multiple elements, clear it
+                    scaleInput.value = '';
+                }
+            } finally {
+                this.isUpdatingScaleInput = false;
+            }
         }
         
         // If multiple elements selected, calculate combined bounding box
@@ -1877,6 +1926,87 @@ class SVGEditor {
                 heightInput.value = '';
             }
         }
+    }
+    
+    applyScaleFromInput(scaleFactor) {
+        console.log("scaled");
+        if (this.selectedElements.size === 0) return;
+        
+        // Apply scale to all selected elements by modifying coordinates directly
+        this.selectedElements.forEach(element => {
+            if (element.tagName !== 'path') {
+                // For now, only handle paths. Other elements could be added later
+                return;
+            }
+            
+            // Temporarily remove transform to get untransformed bounding box and center
+            const savedTransform = element.getAttribute('transform') || '';
+            let centerX, centerY;
+            
+            try {
+                if (savedTransform) {
+                    element.removeAttribute('transform');
+                }
+                
+                // Get bounding box in untransformed local coordinates
+                const bbox = element.getBBox();
+                centerX = bbox.x + bbox.width / 2;
+                centerY = bbox.y + bbox.height / 2;
+            } catch (e) {
+                // Restore transform if getBBox fails
+                if (savedTransform) {
+                    element.setAttribute('transform', savedTransform);
+                }
+                console.warn('Could not get bounding box for element:', e);
+                return;
+            }
+            
+            // Parse path data (path coordinates are always in local space, independent of transforms)
+            const pathData = element.getAttribute('d');
+            if (!pathData) {
+                // Restore transform if no path data
+                if (savedTransform) {
+                    element.setAttribute('transform', savedTransform);
+                }
+                return;
+            }
+            
+            const commands = this.parsePathData(pathData);
+            
+            // Scale all coordinates about the center
+            // Formula: newCoord = center + (coord - center) * scaleFactor
+            commands.forEach(cmd => {
+                if (cmd.type === 'M' || cmd.type === 'L') {
+                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                } else if (cmd.type === 'C') {
+                    cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
+                    cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
+                    cmd.x2 = centerX + (cmd.x2 - centerX) * scaleFactor;
+                    cmd.y2 = centerY + (cmd.y2 - centerY) * scaleFactor;
+                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                } else if (cmd.type === 'Q') {
+                    cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
+                    cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
+                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+                }
+                // Z commands don't have coordinates, so skip them
+            });
+            
+            // Rebuild path data with scaled coordinates
+            const newPathData = this.buildPathData(commands);
+            element.setAttribute('d', newPathData);
+            
+            // Remove transform since we've scaled the coordinates directly
+            // The coordinates are now in the original coordinate system, scaled
+            element.removeAttribute('transform');
+        });
+        
+        // Update bounding box and panel display
+        this.updateBoundingBox();
+        this.updateTransformPanel();
     }
     
     setupSettingsDialog() {
@@ -2148,8 +2278,43 @@ class SVGEditor {
         
         // Store initial transforms for each element to calculate deltas
         this.transformStartStates = new Map();
+        this.transformStartCenters = new Map(); // Store center in element-local coordinates
+        
+        // Calculate transform center in root coordinates
+        const centerRootX = this.transformStartBBox.x + this.transformStartBBox.width / 2;
+        const centerRootY = this.transformStartBBox.y + this.transformStartBBox.height / 2;
+        
         this.selectedElements.forEach(element => {
             this.transformStartStates.set(element, this.getElementTransform(element));
+            
+            // Get the center point in element's local (untransformed) coordinate space
+            // Use getBBox() which returns coordinates in the element's local space
+            try {
+                const bbox = element.getBBox();
+                const centerLocalX = bbox.x + bbox.width / 2;
+                const centerLocalY = bbox.y + bbox.height / 2;
+                this.transformStartCenters.set(element, { x: centerLocalX, y: centerLocalY });
+            } catch (e) {
+                // Fallback: convert from root coordinates using initial transform state
+                // Create a temporary point to convert coordinates
+                const point = this.svgElement.createSVGPoint();
+                point.x = centerRootX;
+                point.y = centerRootY;
+                
+                // Get element's screen CTM at the start (before any transforms during this operation)
+                const elemScreenCTM = element.getScreenCTM();
+                const rootScreenCTM = this.svgElement.getScreenCTM();
+                if (elemScreenCTM && rootScreenCTM) {
+                    // root user -> screen
+                    const screenPt = point.matrixTransform(rootScreenCTM);
+                    // screen -> local (using initial transform state)
+                    const localPt = screenPt.matrixTransform(elemScreenCTM.inverse());
+                    this.transformStartCenters.set(element, { x: localPt.x, y: localPt.y });
+                } else {
+                    // Last resort: use root coordinates
+                    this.transformStartCenters.set(element, { x: centerRootX, y: centerRootY });
+                }
+            }
         });
     }
     
@@ -2178,8 +2343,8 @@ class SVGEditor {
             
             // Apply rotation to all selected elements
             this.selectedElements.forEach(element => {
-                // Convert center from root coordinates to element-local coordinates
-                const centerLocal = this.toLocalCoords(element, centerRootX, centerRootY);
+                // Use the stored center point in element-local coordinates (untransformed)
+                const centerLocal = this.transformStartCenters.get(element) || { x: centerRootX, y: centerRootY };
                 
                 // Get initial transform state
                 const initialTransform = this.transformStartStates.get(element) || {};
@@ -2246,8 +2411,9 @@ class SVGEditor {
             
             // Apply scaling to all selected elements
             this.selectedElements.forEach(element => {
-                // Convert center from root coordinates to element-local coordinates
-                const centerLocal = this.toLocalCoords(element, centerRootX, centerRootY);
+                // Use the stored center point in element-local coordinates (untransformed)
+                // This matches the coordinate strategy used by direct select node handles
+                const centerLocal = this.transformStartCenters.get(element) || { x: centerRootX, y: centerRootY };
                 
                 // Get initial transform state
                 const initialTransform = this.transformStartStates.get(element) || {};
@@ -2352,7 +2518,7 @@ class SVGEditor {
 var activeEditor;
 document.addEventListener('DOMContentLoaded', () => {
     activeEditor =new SVGEditor();
-    console.log("v4");
+    console.log("v5");
 });
 
 
