@@ -910,6 +910,12 @@ class SVGEditor {
         this.pendingSelectionMultiSelect = isMultiSelect;
         
         if (this.currentTool === 'select') {
+            // Only allow dragging if the element is already selected
+            if (!this.selectedElements.has(element)) {
+                // Element is not selected, don't allow dragging
+                return;
+            }
+            
             // Don't select yet - wait for mouseup
             // But prepare for dragging
             this.isDragging = true;
@@ -928,17 +934,15 @@ class SVGEditor {
             };
             
             // Store initial transforms of all selected elements
-            // If the element is already selected and there are other selected elements, move all of them
             this.selectedElementsInitialTransforms.clear();
-            if (this.selectedElements.has(element) && this.selectedElements.size > 1) {
-                // Store transforms for all selected elements (including the dragged one)
+            if (this.selectedElements.size > 1) {
+                // Store transforms for all selected elements
                 this.selectedElements.forEach(selectedEl => {
                     const transform = this.getElementTransform(selectedEl);
                     this.selectedElementsInitialTransforms.set(selectedEl, transform);
                 });
             } else {
-                // Store transform for just the dragged element
-                // This happens when: element is not yet selected, or it's the only selected element
+                // Store transform for just the dragged element (only one selected)
                 const transform = this.getElementTransform(element);
                 this.selectedElementsInitialTransforms.set(element, transform);
             }
