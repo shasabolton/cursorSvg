@@ -1925,7 +1925,6 @@ class SVGEditor {
     }
     
     applyScaleFromInput(scaleFactor) {
-        console.log("scaled");
         if (this.selectedElements.size === 0) return;
         
         // Apply scale to all selected elements by modifying coordinates directly
@@ -1987,7 +1986,7 @@ class SVGEditor {
             }
             
             // Remove transform since we've scaled the coordinates directly
-            element.removeAttribute('transform');
+            //element.removeAttribute('transform');
         });
         
         // Update bounding box and panel display
