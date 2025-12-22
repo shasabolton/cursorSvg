@@ -578,8 +578,8 @@ class SVGEditor {
             if (element.tagName === 'path') {
                 this.moveNode(element, index, newX, newY, pointType);
             } else {
-                // For non-path elements, we might need different handling
-                // For now, skip non-path elements
+                // For non-path elements (rectangles, circles, etc.), move the corner
+                this.moveElementCorner(element, index, newX, newY);
             }
         });
         
@@ -2034,6 +2034,135 @@ class SVGEditor {
         }
         
         return commands;
+    }
+    
+    moveElementCorner(element, cornerIndex, newXRoot, newYRoot) {
+        // Convert from root SVG coordinates to element-local coordinates
+        const local = this.toLocalCoords(element, newXRoot, newYRoot);
+        
+        if (element.tagName === 'rect') {
+            const currentX = parseFloat(element.getAttribute('x')) || 0;
+            const currentY = parseFloat(element.getAttribute('y')) || 0;
+            const currentWidth = parseFloat(element.getAttribute('width')) || 0;
+            const currentHeight = parseFloat(element.getAttribute('height')) || 0;
+            
+            let rectX = currentX;
+            let rectY = currentY;
+            let rectWidth = currentWidth;
+            let rectHeight = currentHeight;
+            
+            // Adjust based on which corner is moved
+            // Corner indices: 0 = top-left, 1 = top-right, 2 = bottom-right, 3 = bottom-left
+            switch (cornerIndex) {
+                case 0: // Top-left corner
+                    rectWidth = (currentX + currentWidth) - local.x;
+                    rectHeight = (currentY + currentHeight) - local.y;
+                    rectX = local.x;
+                    rectY = local.y;
+                    break;
+                case 1: // Top-right corner
+                    rectWidth = local.x - currentX;
+                    rectHeight = (currentY + currentHeight) - local.y;
+                    rectX = currentX;
+                    rectY = local.y;
+                    break;
+                case 2: // Bottom-right corner
+                    rectWidth = local.x - currentX;
+                    rectHeight = local.y - currentY;
+                    rectX = currentX;
+                    rectY = currentY;
+                    break;
+                case 3: // Bottom-left corner
+                    rectWidth = (currentX + currentWidth) - local.x;
+                    rectHeight = local.y - currentY;
+                    rectX = local.x;
+                    rectY = currentY;
+                    break;
+            }
+            
+            // Ensure width and height are positive
+            if (rectWidth < 0) {
+                rectX += rectWidth;
+                rectWidth = Math.abs(rectWidth);
+            }
+            if (rectHeight < 0) {
+                rectY += rectHeight;
+                rectHeight = Math.abs(rectHeight);
+            }
+            
+            // Only update if the values are valid
+            if (rectWidth > 0 && rectHeight > 0) {
+                element.setAttribute('x', rectX);
+                element.setAttribute('y', rectY);
+                element.setAttribute('width', rectWidth);
+                element.setAttribute('height', rectHeight);
+            }
+        } else if (element.tagName === 'circle') {
+            // For circles, corners represent points on the circumference
+            // Moving a corner should resize the circle
+            const currentCX = parseFloat(element.getAttribute('cx')) || 0;
+            const currentCY = parseFloat(element.getAttribute('cy')) || 0;
+            const currentR = parseFloat(element.getAttribute('r')) || 0;
+            
+            // Get current center in root coordinates
+            const centerRoot = this.toRootCoords(element, currentCX, currentCY);
+            
+            // Calculate new radius as distance from center to new corner position
+            const dx = newXRoot - centerRoot.x;
+            const dy = newYRoot - centerRoot.y;
+            const newR = Math.sqrt(dx * dx + dy * dy);
+            
+            if (newR > 0) {
+                element.setAttribute('r', newR);
+            }
+        } else if (element.tagName === 'ellipse') {
+            // For ellipses, corners represent points on the ellipse
+            // This is more complex - for now, just adjust rx/ry proportionally
+            const currentCX = parseFloat(element.getAttribute('cx')) || 0;
+            const currentCY = parseFloat(element.getAttribute('cy')) || 0;
+            const currentRX = parseFloat(element.getAttribute('rx')) || 0;
+            const currentRY = parseFloat(element.getAttribute('ry')) || 0;
+            
+            // Get current center in root coordinates
+            const centerRoot = this.toRootCoords(element, currentCX, currentCY);
+            
+            // Calculate distance from center
+            const dx = newXRoot - centerRoot.x;
+            const dy = newYRoot - centerRoot.y;
+            
+            // Adjust rx or ry based on which corner (simplified)
+            // Corner 0: top-left -> decrease both
+            // Corner 1: top-right -> increase rx, decrease ry
+            // Corner 2: bottom-right -> increase both
+            // Corner 3: bottom-left -> decrease rx, increase ry
+            let newRX = currentRX;
+            let newRY = currentRY;
+            
+            switch (cornerIndex) {
+                case 0:
+                    newRX = Math.abs(dx);
+                    newRY = Math.abs(dy);
+                    break;
+                case 1:
+                    newRX = Math.abs(dx);
+                    newRY = Math.abs(dy);
+                    break;
+                case 2:
+                    newRX = Math.abs(dx);
+                    newRY = Math.abs(dy);
+                    break;
+                case 3:
+                    newRX = Math.abs(dx);
+                    newRY = Math.abs(dy);
+                    break;
+            }
+            
+            if (newRX > 0 && newRY > 0) {
+                element.setAttribute('rx', newRX);
+                element.setAttribute('ry', newRY);
+            }
+        }
+        // Add more element types as needed
     }
     
     moveNode(element, commandIndex, x, y, pointType = null) {
