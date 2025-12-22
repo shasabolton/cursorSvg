@@ -2806,26 +2806,34 @@ class SVGEditor {
     applyScaleFromInput(scaleFactor) {
         if (this.selectedElements.size === 0) return;
         
+        // Check if we should scale about each element's own center or selection center
+        const scaleAboutOwnCenterCheckbox = document.getElementById('scaleAboutOwnCenter');
+        const scaleAboutOwnCenter = scaleAboutOwnCenterCheckbox ? scaleAboutOwnCenterCheckbox.checked : false;
+        
+        // Get selection center in root coordinates (if not scaling about own center)
+        let selectionCenterRoot = null;
+        if (!scaleAboutOwnCenter && this.selectedElements.size > 1) {
+            selectionCenterRoot = this.getSelectionCenterRoot();
+        }
+        
         // Apply scale to all selected elements by modifying coordinates directly
         this.selectedElements.forEach(element => {
-            // Temporarily remove transform to get untransformed bounding box and center
-            
             let centerX, centerY;
-                
-            // Get bounding box in untransformed local coordinates
-            const bbox = element.getBBox();
-            centerX = bbox.x + bbox.width / 2;
-            centerY = bbox.y + bbox.height / 2;
-           
             
-            // Handle different element types
-            const tagName = element.tagName.toLowerCase();
+            if (scaleAboutOwnCenter || !selectionCenterRoot) {
+                // Get bounding box in untransformed local coordinates (own center)
+                const bbox = element.getBBox();
+                centerX = bbox.x + bbox.width / 2;
+                centerY = bbox.y + bbox.height / 2;
+            } else {
+                // Convert selection center from root coordinates to this element's local coordinates
+                const centerLocal = this.toLocalCoords(element, selectionCenterRoot.x, selectionCenterRoot.y);
+                centerX = centerLocal.x;
+                centerY = centerLocal.y;
+            }
             
             // Use uniform scaling for transform panel input
             this.scaleElementCoordinates(element, centerX, centerY, scaleFactor, scaleFactor);
-            
-            // Remove transform since we've scaled the coordinates directly
-            //element.removeAttribute('transform');
         });
         
         // Update bounding box and panel display
@@ -2932,6 +2940,45 @@ class SVGEditor {
                 }
                 break;
         }
+    }
+    
+    getSelectionCenterRoot() {
+        // Calculate the center of all selected elements in root SVG coordinates
+        if (this.selectedElements.size === 0) return null;
+        
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+        
+        this.selectedElements.forEach(element => {
+            try {
+                const bbox = element.getBBox();
+                // Get all four corners of the bounding box
+                const corners = [
+                    { x: bbox.x, y: bbox.y }, // top-left
+                    { x: bbox.x + bbox.width, y: bbox.y }, // top-right
+                    { x: bbox.x + bbox.width, y: bbox.y + bbox.height }, // bottom-right
+                    { x: bbox.x, y: bbox.y + bbox.height } // bottom-left
+                ];
+                
+                // Convert each corner to root SVG coordinates
+                corners.forEach(corner => {
+                    const rootCoords = this.toRootCoords(element, corner.x, corner.y);
+                    minX = Math.min(minX, rootCoords.x);
+                    minY = Math.min(minY, rootCoords.y);
+                    maxX = Math.max(maxX, rootCoords.x);
+                    maxY = Math.max(maxY, rootCoords.y);
+                });
+            } catch (e) {
+                // Skip elements that don't support getBBox
+            }
+        });
+        
+        if (minX === Infinity || minY === Infinity) return null;
+        
+        return {
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2
+        };
     }
     
     scaleElementCoordinates(element, centerX, centerY, scaleX, scaleY) {
@@ -3584,6 +3631,17 @@ class SVGEditor {
                 }
             }
             
+            // Check if we should scale about each element's own center or selection center
+            const scaleAboutOwnCenterCheckbox = document.getElementById('scaleAboutOwnCenter');
+            const scaleAboutOwnCenter = scaleAboutOwnCenterCheckbox ? scaleAboutOwnCenterCheckbox.checked : false;
+            
+            // Get selection center in root coordinates (if not scaling about own center)
+            // Use the transform start bounding box center for consistency
+            const selectionCenterRoot = scaleAboutOwnCenter || this.selectedElements.size === 1 ? null : {
+                x: this.transformStartBBox.x + this.transformStartBBox.width / 2,
+                y: this.transformStartBBox.y + this.transformStartBBox.height / 2
+            };
+            
             // Apply scaling to all selected elements using coordinate-level scaling
             // This uses the same function as the transform panel input
             this.selectedElements.forEach(element => {
@@ -3593,21 +3651,31 @@ class SVGEditor {
                     this.restoreElementData(element, originalData);
                 }
                 
-                // Get the center point in element's local coordinates (from original state)
-                let centerLocal = this.transformStartCenters.get(element);
+                // Get the center point in element's local coordinates
+                let centerLocal;
                 
-                if (!centerLocal) {
-                    // Fallback: get center from current bounding box
-                    try {
-                        const bbox = element.getBBox();
-                        centerLocal = {
-                            x: bbox.x + bbox.width / 2,
-                            y: bbox.y + bbox.height / 2
-                        };
-                    } catch (e) {
-                        // Skip this element if we can't get its bbox
-                        return;
+                if (scaleAboutOwnCenter || !selectionCenterRoot) {
+                    // Use the stored center point in element-local coordinates (from original state)
+                    centerLocal = this.transformStartCenters.get(element);
+                    
+                    if (!centerLocal) {
+                        // Fallback: get center from current bounding box
+                        try {
+                            const bbox = element.getBBox();
+                            centerLocal = {
+                                x: bbox.x + bbox.width / 2,
+                                y: bbox.y + bbox.height / 2
+                            };
+                        } catch (e) {
+                            // Skip this element if we can't get its bbox
+                            return;
+                        }
                     }
+                } else {
+                    // Convert selection center from root coordinates to this element's local coordinates
+                    // Need to convert using the original state (before any transforms)
+                    const centerLocalFromRoot = this.toLocalCoords(element, selectionCenterRoot.x, selectionCenterRoot.y);
+                    centerLocal = centerLocalFromRoot;
                 }
                 
                 // Use the coordinate-level scaling function (same as transform panel)
