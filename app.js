@@ -14,7 +14,7 @@ class SVGEditor {
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
         this.selectedNodesInitialPositions = new Map(); // Store initial positions of all selected nodes when drag starts
-        this.proximityThreshold = 100; // pixels - distance threshold for selecting paths
+        this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
