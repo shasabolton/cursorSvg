@@ -4,6 +4,7 @@ class SVGEditor {
         this.selectedElements = new Set();
         this.selectedNodes = new Set();
         this.layers = [];
+        this.lastSelectedLayerIndex = null; // Track last selected layer for range selection
         this.svgElement = null;
         this.svgWrapper = null;
         this.isDragging = false;
@@ -12,6 +13,7 @@ class SVGEditor {
         this.nodeHandles = [];
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
+        this.selectedNodesInitialPositions = new Map(); // Store initial positions of all selected nodes when drag starts
         this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
@@ -580,10 +582,11 @@ class SVGEditor {
             return;
         }
         
-        this.layers.forEach(layer => {
+        this.layers.forEach((layer, index) => {
             const item = document.createElement('div');
             item.className = 'layer-item';
             item.dataset.layerId = layer.id;
+            item.dataset.layerIndex = index;
             
             if (this.selectedElements.has(layer.element)) {
                 item.classList.add('selected');
@@ -603,7 +606,55 @@ class SVGEditor {
             // Select layer
             item.addEventListener('click', (e) => {
                 if (e.target.tagName !== 'INPUT') {
-                    this.selectElement(layer.element, e.ctrlKey || e.metaKey);
+                    if (e.shiftKey && this.lastSelectedLayerIndex !== null) {
+                        // Range selection: apply the clicked layer's selection state to all layers in range
+                        // Save the last selected index
+                        const rangeStartIndex = this.lastSelectedLayerIndex;
+                        const startIndex = Math.min(rangeStartIndex, index);
+                        const endIndex = Math.max(rangeStartIndex, index);
+                        
+                        // Determine what to do based on the clicked layer's current state
+                        const clickedLayerElement = layer.element;
+                        const shouldSelect = !this.selectedElements.has(clickedLayerElement);
+                        
+                        // Apply the same selection state to all layers in the range
+                        for (let i = startIndex; i <= endIndex; i++) {
+                            const layerElement = this.layers[i].element;
+                            if (shouldSelect) {
+                                // Select all in range
+                                if (!this.selectedElements.has(layerElement)) {
+                                    this.selectedElements.add(layerElement);
+                                    layerElement.classList.add('selected');
+                                }
+                            } else {
+                                // Deselect all in range
+                                if (this.selectedElements.has(layerElement)) {
+                                    this.selectedElements.delete(layerElement);
+                                    layerElement.classList.remove('selected');
+                                }
+                            }
+                        }
+                        
+                        // Update last selected to the clicked layer
+                        this.lastSelectedLayerIndex = index;
+                        
+                        // Update UI
+                        this.updateControlPanel();
+                        this.updateTransformPanel();
+                        this.updateBoundingBox();
+                    } else if (e.ctrlKey || e.metaKey) {
+                        // Ctrl/Cmd click: toggle individual layer
+                        this.selectElement(layer.element, true);
+                        // Update last selected if this layer is now selected
+                        if (this.selectedElements.has(layer.element)) {
+                            this.lastSelectedLayerIndex = index;
+                        }
+                    } else {
+                        // Regular click: clear and select only this layer
+                        this.clearSelection();
+                        this.selectElement(layer.element, false);
+                        this.lastSelectedLayerIndex = index;
+                    }
                     this.renderLayersPanel();
                 }
             });
@@ -702,7 +753,7 @@ class SVGEditor {
                 }
                 // Clear proximity tracking since we have a direct hit
                 this.proximitySelectedElement = null;
-            } else if (target === this.svgElement && !e.ctrlKey && !e.metaKey) {
+            } else if (target === this.svgElement && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
                 // Don't clear selection if we just selected an element via proximity
                 if (!this.proximitySelectedElement) {
                     this.clearSelection();
@@ -734,10 +785,11 @@ class SVGEditor {
         
         if (this.currentTool === 'select') {
             // Select immediately on mousedown
-            if (!e.ctrlKey && !e.metaKey && !this.selectedElements.has(element)) {
+            const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+            if (!isMultiSelect && !this.selectedElements.has(element)) {
                 this.clearSelection();
             }
-            this.selectElement(element, e.ctrlKey || e.metaKey);
+            this.selectElement(element, isMultiSelect);
             this.renderLayersPanel();
             
             this.isDragging = true;
@@ -764,7 +816,8 @@ class SVGEditor {
             
             element.classList.add('dragging');
         } else if (this.currentTool === 'direct-select') {
-            this.selectElement(element, e.ctrlKey || e.metaKey);
+            const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+            this.selectElement(element, isMultiSelect);
             this.renderLayersPanel();
             this.showNodeHandles(element);
         }
@@ -826,10 +879,47 @@ class SVGEditor {
             // Convert screen coordinates to SVG coordinates
             const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
             
-            this.moveNode(this.currentDraggedNode.element, 
-                this.currentDraggedNode.index, 
-                svgPoint.x, 
-                svgPoint.y);
+            // Get the nodeId for the current dragged node
+            const elementId = this.currentDraggedNode.element.id || '';
+            const index = this.currentDraggedNode.index;
+            const pointType = this.currentDraggedNode.controlPoint === 1 ? 'control1' : 
+                             this.currentDraggedNode.controlPoint === 2 ? 'control2' : 'main';
+            const currentNodeId = `${elementId}-${index}-${pointType}`;
+            
+            // Get initial position of the current dragged node
+            const currentInitialData = this.selectedNodesInitialPositions.get(currentNodeId);
+            if (!currentInitialData) {
+                // Fallback: just move the current node if we don't have initial position
+                this.moveNode(this.currentDraggedNode.element, 
+                    this.currentDraggedNode.index, 
+                    svgPoint.x, 
+                    svgPoint.y);
+            } else {
+                // Calculate delta from initial position
+                const deltaX = svgPoint.x - currentInitialData.pos.x;
+                const deltaY = svgPoint.y - currentInitialData.pos.y;
+                
+                // Move all selected nodes by the same delta
+                this.selectedNodes.forEach(nodeId => {
+                    const nodeData = this.selectedNodesInitialPositions.get(nodeId);
+                    if (!nodeData || !nodeData.nodeInfo) return;
+                    
+                    const { nodeInfo, pos } = nodeData;
+                    
+                    // Calculate new position
+                    const newX = pos.x + deltaX;
+                    const newY = pos.y + deltaY;
+                    
+                    // Move this node
+                    if (nodeInfo.element.tagName === 'path') {
+                        this.moveNode(nodeInfo.element, nodeInfo.index, newX, newY, nodeInfo.pointType);
+                    } else {
+                        // For non-path elements, we need to handle corner movement differently
+                        // This would require moving the entire element, which is more complex
+                        // For now, skip non-path elements in multi-node drag
+                    }
+                });
+            }
             
             // Update transform panel during node dragging (shape may change)
             this.updateTransformPanel();
@@ -848,6 +938,7 @@ class SVGEditor {
                 this.currentDraggedElement = null;
             }
             this.currentDraggedNode = null;
+            this.selectedNodesInitialPositions.clear();
             this.wasDragging = false;
             // Update layers panel after drag completes
             this.renderLayersPanel();
@@ -978,6 +1069,12 @@ class SVGEditor {
             element.classList.add('selected');
         }
         
+        // Update last selected layer index if this element corresponds to a layer and is selected
+        const layerIndex = this.layers.findIndex(layer => layer.element === element);
+        if (layerIndex !== -1 && this.selectedElements.has(element)) {
+            this.lastSelectedLayerIndex = layerIndex;
+        }
+        
         // Force a reflow to ensure the class is applied
         element.offsetHeight;
         
@@ -991,12 +1088,47 @@ class SVGEditor {
         this.updateBoundingBox();
     }
     
+    selectNode(nodeHandle, multiSelect = false) {
+        if (!nodeHandle) return;
+        
+        // Create a unique identifier for the node
+        // Handle both path nodes (commandIndex) and element corner handles (cornerIndex)
+        const commandIndex = nodeHandle.dataset.commandIndex;
+        const cornerIndex = nodeHandle.dataset.cornerIndex;
+        const pointType = nodeHandle.dataset.pointType || (cornerIndex !== undefined ? `corner${cornerIndex}` : 'main');
+        const index = commandIndex !== undefined ? commandIndex : cornerIndex;
+        const elementId = nodeHandle.dataset.elementId || '';
+        const nodeId = `${elementId}-${index}-${pointType}`;
+        
+        if (!multiSelect) {
+            this.clearNodeSelection();
+        }
+        
+        if (this.selectedNodes.has(nodeId)) {
+            this.selectedNodes.delete(nodeId);
+            nodeHandle.classList.remove('selected');
+        } else {
+            this.selectedNodes.add(nodeId);
+            nodeHandle.classList.add('selected');
+        }
+    }
+    
+    clearNodeSelection() {
+        // Clear selection from all node handles
+        this.nodeHandles.forEach(handle => {
+            handle.classList.remove('selected');
+        });
+        this.selectedNodes.clear();
+    }
+    
     clearSelection() {
         this.selectedElements.forEach(el => {
             el.classList.remove('selected');
         });
         this.selectedElements.clear();
+        this.clearNodeSelection();
         this.clearNodeHandles();
+        this.lastSelectedLayerIndex = null; // Reset last selected layer index
         this.updateControlPanel();
         this.updateTransformPanel();
         this.updateBoundingBox();
@@ -1058,14 +1190,34 @@ class SVGEditor {
                 handle.dataset.commandIndex = index;
                 handle.dataset.pointType = 'main';
                 
+                // Restore selection state if this node was previously selected
+                const nodeId = `${element.id || ''}-${index}-main`;
+                if (this.selectedNodes.has(nodeId)) {
+                    handle.classList.add('selected');
+                }
+                
                 handle.addEventListener('mousedown', (e) => {
                     e.stopPropagation();
+                    const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+                    this.selectNode(handle, isMultiSelect);
                     this.isDragging = true;
                     this.currentDraggedNode = {
                         element: element,
                         index: index,
                         command: cmd
                     };
+                    
+                    // Store initial positions of all selected nodes
+                    this.selectedNodesInitialPositions.clear();
+                    this.selectedNodes.forEach(nodeId => {
+                        const nodeInfo = this.parseNodeId(nodeId);
+                        if (nodeInfo) {
+                            const pos = this.getNodePosition(nodeInfo);
+                            if (pos) {
+                                this.selectedNodesInitialPositions.set(nodeId, { nodeInfo, pos });
+                            }
+                        }
+                    });
                 });
                 
                 this.svgElement.appendChild(handle);
@@ -1083,8 +1235,16 @@ class SVGEditor {
                     cp1.dataset.pointType = 'control1';
                     cp1.style.fill = '#ff9800';
                     
+                    // Restore selection state if this node was previously selected
+                    const cp1NodeId = `${element.id || ''}-${index}-control1`;
+                    if (this.selectedNodes.has(cp1NodeId)) {
+                        cp1.classList.add('selected');
+                    }
+                    
                     cp1.addEventListener('mousedown', (e) => {
                         e.stopPropagation();
+                        const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+                        this.selectNode(cp1, isMultiSelect);
                         this.isDragging = true;
                         this.currentDraggedNode = {
                             element: element,
@@ -1092,6 +1252,18 @@ class SVGEditor {
                             command: cmd,
                             controlPoint: 1
                         };
+                        
+                        // Store initial positions of all selected nodes
+                        this.selectedNodesInitialPositions.clear();
+                        this.selectedNodes.forEach(nodeId => {
+                            const nodeInfo = this.parseNodeId(nodeId);
+                            if (nodeInfo) {
+                                const pos = this.getNodePosition(nodeInfo);
+                                if (pos) {
+                                    this.selectedNodesInitialPositions.set(nodeId, pos);
+                                }
+                            }
+                        });
                     });
                     
                     this.svgElement.appendChild(cp1);
@@ -1107,8 +1279,16 @@ class SVGEditor {
                     cp2.dataset.pointType = 'control2';
                     cp2.style.fill = '#ff9800';
                     
+                    // Restore selection state if this node was previously selected
+                    const cp2NodeId = `${element.id || ''}-${index}-control2`;
+                    if (this.selectedNodes.has(cp2NodeId)) {
+                        cp2.classList.add('selected');
+                    }
+                    
                     cp2.addEventListener('mousedown', (e) => {
                         e.stopPropagation();
+                        const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+                        this.selectNode(cp2, isMultiSelect);
                         this.isDragging = true;
                         this.currentDraggedNode = {
                             element: element,
@@ -1116,6 +1296,18 @@ class SVGEditor {
                             command: cmd,
                             controlPoint: 2
                         };
+                        
+                        // Store initial positions of all selected nodes
+                        this.selectedNodesInitialPositions.clear();
+                        this.selectedNodes.forEach(nodeId => {
+                            const nodeInfo = this.parseNodeId(nodeId);
+                            if (nodeInfo) {
+                                const pos = this.getNodePosition(nodeInfo);
+                                if (pos) {
+                                    this.selectedNodesInitialPositions.set(nodeId, pos);
+                                }
+                            }
+                        });
                     });
                     
                     this.svgElement.appendChild(cp2);
@@ -1147,8 +1339,17 @@ class SVGEditor {
             handle.dataset.elementId = element.id;
             handle.dataset.cornerIndex = index;
             
+            // Restore selection state if this node was previously selected
+            // Note: selectNode generates IDs as: elementId-cornerIndex-corner{cornerIndex}
+            const cornerNodeId = `${element.id || ''}-${index}-corner${index}`;
+            if (this.selectedNodes.has(cornerNodeId)) {
+                handle.classList.add('selected');
+            }
+            
             handle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
+                const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+                this.selectNode(handle, isMultiSelect);
                 // For non-path elements, we'll move the entire element
                 this.isDragging = true;
                 this.currentDraggedElement = element;
@@ -1179,6 +1380,7 @@ class SVGEditor {
             }
         });
         this.nodeHandles = [];
+        // Note: We preserve selectedNodes Set so selection can be restored when handles are recreated
     }
 
     // Helpers to map between element-local coordinates and SVG root coordinates
@@ -1208,6 +1410,97 @@ class SVGEditor {
         // screen -> local
         const localPt = screenPt.matrixTransform(elemScreenCTM.inverse());
         return { x: localPt.x, y: localPt.y };
+    }
+    
+    // Get node info from nodeHandles by matching nodeId
+    getNodeInfoFromHandles(nodeId) {
+        for (const handle of this.nodeHandles) {
+            const handleElementId = handle.dataset.elementId || '';
+            const commandIndex = handle.dataset.commandIndex;
+            const cornerIndex = handle.dataset.cornerIndex;
+            const pointType = handle.dataset.pointType || (cornerIndex !== undefined ? `corner${cornerIndex}` : 'main');
+            const index = commandIndex !== undefined ? commandIndex : cornerIndex;
+            const handleNodeId = `${handleElementId}-${index}-${pointType}`;
+            
+            if (handleNodeId === nodeId) {
+                // Find the element - search by ID or find the element that this handle was created for
+                let element = handleElementId ? document.getElementById(handleElementId) : null;
+                
+                // If not found by ID, search through all elements
+                if (!element) {
+                    const allElements = this.svgElement.querySelectorAll('path, rect, circle, ellipse, line, polyline, polygon');
+                    for (const el of allElements) {
+                        if ((el.id || '') === handleElementId) {
+                            element = el;
+                            break;
+                        }
+                    }
+                }
+                
+                if (element) {
+                    return { element, index: parseInt(index), pointType };
+                }
+            }
+        }
+        return null;
+    }
+    
+    // Parse nodeId to extract element, index, and point type (fallback method)
+    parseNodeId(nodeId) {
+        // First try to get from nodeHandles (more reliable)
+        const nodeInfo = this.getNodeInfoFromHandles(nodeId);
+        if (nodeInfo) return nodeInfo;
+        
+        // Fallback: parse the nodeId string
+        const parts = nodeId.split('-');
+        if (parts.length < 3) return null;
+        
+        const elementId = parts[0];
+        const index = parseInt(parts[1]);
+        const pointType = parts.slice(2).join('-'); // Handle point types like "corner0"
+        
+        // Try to find element by ID
+        const element = elementId ? document.getElementById(elementId) : null;
+        if (!element) return null;
+        
+        return { element, index, pointType };
+    }
+    
+    // Get current position of a node in root SVG coordinates
+    getNodePosition(nodeInfo) {
+        const { element, index, pointType } = nodeInfo;
+        
+        if (element.tagName === 'path') {
+            const pathData = element.getAttribute('d');
+            const commands = this.parsePathData(pathData);
+            
+            if (index >= commands.length) return null;
+            
+            const cmd = commands[index];
+            
+            if (pointType === 'control1') {
+                return this.toRootCoords(element, cmd.x1, cmd.y1);
+            } else if (pointType === 'control2') {
+                return this.toRootCoords(element, cmd.x2, cmd.y2);
+            } else if (pointType === 'main') {
+                return this.toRootCoords(element, cmd.x, cmd.y);
+            }
+        } else {
+            // For non-path elements, get corner position
+            const bbox = element.getBBox();
+            const corners = [
+                { x: bbox.x, y: bbox.y },
+                { x: bbox.x + bbox.width, y: bbox.y },
+                { x: bbox.x + bbox.width, y: bbox.y + bbox.height },
+                { x: bbox.x, y: bbox.y + bbox.height }
+            ];
+            
+            if (index >= 0 && index < corners.length) {
+                return this.toRootCoords(element, corners[index].x, corners[index].y);
+            }
+        }
+        
+        return null;
     }
     
     findNearestThinElementAtPoint(elements, screenX, screenY) {
@@ -1630,7 +1923,7 @@ class SVGEditor {
         return commands;
     }
     
-    moveNode(element, commandIndex, x, y) {
+    moveNode(element, commandIndex, x, y, pointType = null) {
         if (element.tagName !== 'path') return;
         
         const pathData = element.getAttribute('d');
@@ -1643,10 +1936,22 @@ class SVGEditor {
         // Convert from root SVG coords back into element-local coords, so that transforms on the path are respected
         const local = this.toLocalCoords(element, x, y);
         
-        if (this.currentDraggedNode.controlPoint === 1) {
+        // Determine which point to move based on pointType parameter or currentDraggedNode
+        let controlPoint = null;
+        if (pointType === 'control1') {
+            controlPoint = 1;
+        } else if (pointType === 'control2') {
+            controlPoint = 2;
+        } else if (this.currentDraggedNode && this.currentDraggedNode.controlPoint === 1) {
+            controlPoint = 1;
+        } else if (this.currentDraggedNode && this.currentDraggedNode.controlPoint === 2) {
+            controlPoint = 2;
+        }
+        
+        if (controlPoint === 1) {
             cmd.x1 = local.x;
             cmd.y1 = local.y;
-        } else if (this.currentDraggedNode.controlPoint === 2) {
+        } else if (controlPoint === 2) {
             cmd.x2 = local.x;
             cmd.y2 = local.y;
         } else {
