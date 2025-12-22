@@ -36,6 +36,7 @@ class SVGEditor {
         this.transformStartBBox = null;
         this.transformStartStates = new Map();
         this.transformStartCenters = new Map(); // Store center in element-local coords
+        this.transformStartElementData = new Map(); // Store original element data for scaling
         this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
         this.init();
@@ -1954,6 +1955,107 @@ class SVGEditor {
         this.updateTransformPanel();
     }
     
+    saveElementData(element) {
+        // Save the original element data for restoring before scaling
+        const tagName = element.tagName.toLowerCase();
+        const data = { tagName, transform: element.getAttribute('transform') || '' };
+        
+        switch (tagName) {
+            case 'path':
+                data.d = element.getAttribute('d') || '';
+                break;
+            case 'rect':
+                data.x = element.getAttribute('x') || '0';
+                data.y = element.getAttribute('y') || '0';
+                data.width = element.getAttribute('width') || '0';
+                data.height = element.getAttribute('height') || '0';
+                break;
+            case 'circle':
+                data.cx = element.getAttribute('cx') || '0';
+                data.cy = element.getAttribute('cy') || '0';
+                data.r = element.getAttribute('r') || '0';
+                break;
+            case 'ellipse':
+                data.cx = element.getAttribute('cx') || '0';
+                data.cy = element.getAttribute('cy') || '0';
+                data.rx = element.getAttribute('rx') || '0';
+                data.ry = element.getAttribute('ry') || '0';
+                break;
+            case 'line':
+                data.x1 = element.getAttribute('x1') || '0';
+                data.y1 = element.getAttribute('y1') || '0';
+                data.x2 = element.getAttribute('x2') || '0';
+                data.y2 = element.getAttribute('y2') || '0';
+                break;
+            case 'polyline':
+            case 'polygon':
+                data.points = element.getAttribute('points') || '';
+                break;
+            case 'text':
+                data.x = element.getAttribute('x') || '';
+                data.y = element.getAttribute('y') || '';
+                data.fontSize = element.getAttribute('font-size') || '';
+                break;
+        }
+        
+        return data;
+    }
+    
+    restoreElementData(element, data) {
+        // Restore element to original state before scaling
+        if (data.transform !== undefined) {
+            if (data.transform) {
+                element.setAttribute('transform', data.transform);
+            } else {
+                element.removeAttribute('transform');
+            }
+        }
+        
+        switch (data.tagName) {
+            case 'path':
+                if (data.d !== undefined) element.setAttribute('d', data.d);
+                break;
+            case 'rect':
+                if (data.x !== undefined) element.setAttribute('x', data.x);
+                if (data.y !== undefined) element.setAttribute('y', data.y);
+                if (data.width !== undefined) element.setAttribute('width', data.width);
+                if (data.height !== undefined) element.setAttribute('height', data.height);
+                break;
+            case 'circle':
+                if (data.cx !== undefined) element.setAttribute('cx', data.cx);
+                if (data.cy !== undefined) element.setAttribute('cy', data.cy);
+                if (data.r !== undefined) element.setAttribute('r', data.r);
+                break;
+            case 'ellipse':
+                if (data.cx !== undefined) element.setAttribute('cx', data.cx);
+                if (data.cy !== undefined) element.setAttribute('cy', data.cy);
+                if (data.rx !== undefined) element.setAttribute('rx', data.rx);
+                if (data.ry !== undefined) element.setAttribute('ry', data.ry);
+                break;
+            case 'line':
+                if (data.x1 !== undefined) element.setAttribute('x1', data.x1);
+                if (data.y1 !== undefined) element.setAttribute('y1', data.y1);
+                if (data.x2 !== undefined) element.setAttribute('x2', data.x2);
+                if (data.y2 !== undefined) element.setAttribute('y2', data.y2);
+                break;
+            case 'polyline':
+            case 'polygon':
+                if (data.points !== undefined) element.setAttribute('points', data.points);
+                break;
+            case 'text':
+                if (data.x !== undefined) element.setAttribute('x', data.x);
+                if (data.y !== undefined) element.setAttribute('y', data.y);
+                if (data.fontSize !== undefined) {
+                    if (data.fontSize) {
+                        element.setAttribute('font-size', data.fontSize);
+                    } else {
+                        element.removeAttribute('font-size');
+                    }
+                }
+                break;
+        }
+    }
+    
     scaleElementCoordinates(element, centerX, centerY, scaleX, scaleY) {
         // Route to appropriate scaling function based on element type
         const tagName = element.tagName.toLowerCase();
@@ -2427,6 +2529,10 @@ class SVGEditor {
         this.selectedElements.forEach(element => {
             this.transformStartStates.set(element, this.getElementTransform(element));
             
+            // Store original element data for coordinate-level scaling
+            // This prevents scaling from compounding on each mouse move
+            this.transformStartElementData.set(element, this.saveElementData(element));
+            
             // Get the center point in element's local (untransformed) coordinate space
             // Use getBBox() which returns coordinates in the element's local space
             try {
@@ -2529,18 +2635,29 @@ class SVGEditor {
             
             const handle = handles[this.transformHandle];
             if (handle) {
-                // Calculate distance from center in root coordinates
-                const startDistX = Math.abs(this.transformStart.x - centerRootX);
-                const startDistY = Math.abs(this.transformStart.y - centerRootY);
+                // Calculate distance from center in SVG coordinates (not absolute, preserve direction)
+                // Use the same coordinate conversion as direct select node dragging
+                const startDx = this.transformStart.x - centerRootX;
+                const startDy = this.transformStart.y - centerRootY;
                 
-                const currentDistX = Math.abs(svgPoint.x - centerRootX);
-                const currentDistY = Math.abs(svgPoint.y - centerRootY);
+                const currentDx = svgPoint.x - centerRootX;
+                const currentDy = svgPoint.y - centerRootY;
                 
-                if (handle.x !== 0 && startDistX > 0) {
-                    scaleX = currentDistX / startDistX;
+                // Calculate scale factors based on handle direction
+                // For each axis, only scale if the handle controls that axis
+                if (handle.x !== 0 && Math.abs(startDx) > 0.001) {
+                    scaleX = currentDx / startDx;
                 }
-                if (handle.y !== 0 && startDistY > 0) {
-                    scaleY = currentDistY / startDistY;
+                if (handle.y !== 0 && Math.abs(startDy) > 0.001) {
+                    scaleY = currentDy / startDy;
+                }
+                
+                // Ensure scale is always positive (take absolute value)
+                if (handle.x !== 0) {
+                    scaleX = Math.abs(scaleX);
+                }
+                if (handle.y !== 0) {
+                    scaleY = Math.abs(scaleY);
                 }
                 
                 // Maintain aspect ratio for corner handles (Shift key)
@@ -2552,7 +2669,13 @@ class SVGEditor {
             // Apply scaling to all selected elements using coordinate-level scaling
             // This uses the same function as the transform panel input
             this.selectedElements.forEach(element => {
-                // Get the center point in element's local coordinates (untransformed)
+                // Restore to original state before scaling to prevent compounding
+                const originalData = this.transformStartElementData.get(element);
+                if (originalData) {
+                    this.restoreElementData(element, originalData);
+                }
+                
+                // Get the center point in element's local coordinates (from original state)
                 let centerLocal = this.transformStartCenters.get(element);
                 
                 if (!centerLocal) {
@@ -2571,6 +2694,7 @@ class SVGEditor {
                 
                 // Use the coordinate-level scaling function (same as transform panel)
                 // This preserves existing transforms and scales coordinates directly
+                // Scale from original state, not from current (already scaled) state
                 this.scaleElementCoordinates(element, centerLocal.x, centerLocal.y, scaleX, scaleY);
             });
         }
