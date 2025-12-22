@@ -1935,7 +1935,7 @@ class SVGEditor {
             
             try {
                 if (savedTransform) {
-                    element.removeAttribute('transform');
+                    //element.removeAttribute('transform');
                 }
                 
                 // Get bounding box in untransformed local coordinates
