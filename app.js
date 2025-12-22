@@ -1806,7 +1806,7 @@ class SVGEditor {
                 e.preventDefault();
                 const scalePercent = parseFloat(e.target.value);
                 if (!isNaN(scalePercent) && scalePercent > 0) {
-                    this.applyScaleFromInput(scalePercent/2 / 100);
+                    this.applyScaleFromInput(scalePercent / 100);
                 }
                 // Blur the input after applying
                 e.target.blur();
@@ -1818,7 +1818,7 @@ class SVGEditor {
             if (this.isUpdatingScaleInput) return;
             const scalePercent = parseFloat(e.target.value);
             if (!isNaN(scalePercent) && scalePercent > 0) {
-                this.applyScaleFromInput(scalePercent/2 / 100);
+                this.applyScaleFromInput(scalePercent / 100);
             }
         });
     }
@@ -2666,7 +2666,7 @@ class SVGEditor {
 var activeEditor;
 document.addEventListener('DOMContentLoaded', () => {
     activeEditor =new SVGEditor();
-    console.log("v5");
+    console.log("v7");
 });
 
 
