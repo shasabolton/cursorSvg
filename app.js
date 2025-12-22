@@ -832,7 +832,8 @@ class SVGEditor {
                     if (el.classList && (el.classList.contains('bbox-handle') || el.classList.contains('bbox-rotation-handle'))) return false;
                     return el !== this.svgElement && 
                            (el.tagName === 'path' || el.tagName === 'line' || 
-                            el.tagName === 'polyline' || el.tagName === 'polygon');
+                            el.tagName === 'polyline' || el.tagName === 'polygon' ||
+                            el.tagName === 'circle' || el.tagName === 'rect' || el.tagName === 'ellipse');
                 });
                 
                 // Check elements at the point first (respects z-order)
@@ -1640,9 +1641,9 @@ class SVGEditor {
     findNearestThinElement(screenX, screenY) {
         if (!this.svgElement) return null;
         
-        // Check paths, lines, polylines, and polygons (thin elements that are hard to click)
+        // Check paths, lines, polylines, polygons, circles, and rectangles (thin elements that are hard to click)
         // Check in reverse order so elements that appear later (on top) are checked first
-        const thinElements = Array.from(this.svgElement.querySelectorAll('path, line, polyline, polygon')).reverse();
+        const thinElements = Array.from(this.svgElement.querySelectorAll('path, line, polyline, polygon, circle, rect, ellipse')).reverse();
         let nearestElement = null;
         let minDistance = this.proximityThreshold;
         
@@ -1667,6 +1668,12 @@ class SVGEditor {
             return this.getDistanceToLine(element, point);
         } else if (element.tagName === 'polyline' || element.tagName === 'polygon') {
             return this.getDistanceToPolyline(element, point);
+        } else if (element.tagName === 'circle') {
+            return this.getDistanceToCircle(element, point);
+        } else if (element.tagName === 'rect') {
+            return this.getDistanceToRect(element, point);
+        } else if (element.tagName === 'ellipse') {
+            return this.getDistanceToEllipse(element, point);
         }
         return Infinity;
     }
@@ -1684,6 +1691,12 @@ class SVGEditor {
             return this.getDistanceToLineScreen(element, svgPoint, screenX, screenY);
         } else if (element.tagName === 'polyline' || element.tagName === 'polygon') {
             return this.getDistanceToPolylineScreen(element, svgPoint, screenX, screenY);
+        } else if (element.tagName === 'circle') {
+            return this.getDistanceToCircleScreen(element, svgPoint, screenX, screenY);
+        } else if (element.tagName === 'rect') {
+            return this.getDistanceToRectScreen(element, svgPoint, screenX, screenY);
+        } else if (element.tagName === 'ellipse') {
+            return this.getDistanceToEllipseScreen(element, svgPoint, screenX, screenY);
         }
         return Infinity;
     }
@@ -1933,6 +1946,246 @@ class SVGEditor {
         const dx2 = px - projX;
         const dy2 = py - projY;
         return Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    }
+    
+    getDistanceToCircle(circle, point) {
+        // Get circle properties
+        const cx = parseFloat(circle.getAttribute('cx')) || 0;
+        const cy = parseFloat(circle.getAttribute('cy')) || 0;
+        const r = parseFloat(circle.getAttribute('r')) || 0;
+        
+        if (r === 0) return Infinity;
+        
+        // Transform circle center from local coordinates to SVG coordinates
+        const circleCTM = circle.getCTM();
+        if (!circleCTM) return Infinity;
+        
+        const centerPoint = this.svgElement.createSVGPoint();
+        centerPoint.x = cx;
+        centerPoint.y = cy;
+        const centerSVG = centerPoint.matrixTransform(circleCTM);
+        
+        // Calculate distance from point to circle center
+        const dx = point.x - centerSVG.x;
+        const dy = point.y - centerSVG.y;
+        const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        // Distance to circle edge is distance to center minus radius
+        // If point is inside circle, return 0 (or negative distance)
+        return Math.max(0, distanceToCenter - r);
+    }
+    
+    getDistanceToCircleScreen(circle, svgPoint, screenX, screenY) {
+        // Get circle properties
+        const cx = parseFloat(circle.getAttribute('cx')) || 0;
+        const cy = parseFloat(circle.getAttribute('cy')) || 0;
+        const r = parseFloat(circle.getAttribute('r')) || 0;
+        
+        if (r === 0) return Infinity;
+        
+        // Transform circle center to screen coordinates
+        const circleScreenCTM = circle.getScreenCTM();
+        if (!circleScreenCTM) return Infinity;
+        
+        const centerPoint = this.svgElement.createSVGPoint();
+        centerPoint.x = cx;
+        centerPoint.y = cy;
+        const centerScreen = centerPoint.matrixTransform(circleScreenCTM);
+        
+        // Calculate distance from point to circle center in screen coordinates
+        const dx = screenX - centerScreen.x;
+        const dy = screenY - centerScreen.y;
+        const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        // Distance to circle edge is distance to center minus radius
+        return Math.max(0, distanceToCenter - r);
+    }
+    
+    getDistanceToRect(rect, point) {
+        // Get rectangle properties
+        const x = parseFloat(rect.getAttribute('x')) || 0;
+        const y = parseFloat(rect.getAttribute('y')) || 0;
+        const width = parseFloat(rect.getAttribute('width')) || 0;
+        const height = parseFloat(rect.getAttribute('height')) || 0;
+        const rx = parseFloat(rect.getAttribute('rx')) || 0;
+        const ry = parseFloat(rect.getAttribute('ry')) || 0;
+        
+        if (width === 0 || height === 0) return Infinity;
+        
+        // Transform rectangle corners from local coordinates to SVG coordinates
+        const rectCTM = rect.getCTM();
+        if (!rectCTM) return Infinity;
+        
+        // Calculate rectangle corners
+        const corners = [
+            { x: x, y: y },
+            { x: x + width, y: y },
+            { x: x + width, y: y + height },
+            { x: x, y: y + height }
+        ];
+        
+        const cornersSVG = corners.map(corner => {
+            const p = this.svgElement.createSVGPoint();
+            p.x = corner.x;
+            p.y = corner.y;
+            return p.matrixTransform(rectCTM);
+        });
+        
+        // If rounded rectangles are involved (rx/ry > 0), this is an approximation
+        // For now, calculate distance to the four edges
+        const edges = [
+            [cornersSVG[0], cornersSVG[1]], // top
+            [cornersSVG[1], cornersSVG[2]], // right
+            [cornersSVG[2], cornersSVG[3]], // bottom
+            [cornersSVG[3], cornersSVG[0]]  // left
+        ];
+        
+        let minDistance = Infinity;
+        edges.forEach(([p1, p2]) => {
+            const distance = this.distanceToLineSegment(point.x, point.y, p1.x, p1.y, p2.x, p2.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        });
+        
+        return minDistance;
+    }
+    
+    getDistanceToRectScreen(rect, svgPoint, screenX, screenY) {
+        // Get rectangle properties
+        const x = parseFloat(rect.getAttribute('x')) || 0;
+        const y = parseFloat(rect.getAttribute('y')) || 0;
+        const width = parseFloat(rect.getAttribute('width')) || 0;
+        const height = parseFloat(rect.getAttribute('height')) || 0;
+        
+        if (width === 0 || height === 0) return Infinity;
+        
+        // Transform rectangle corners to screen coordinates
+        const rectScreenCTM = rect.getScreenCTM();
+        if (!rectScreenCTM) return Infinity;
+        
+        // Calculate rectangle corners
+        const corners = [
+            { x: x, y: y },
+            { x: x + width, y: y },
+            { x: x + width, y: y + height },
+            { x: x, y: y + height }
+        ];
+        
+        const cornersScreen = corners.map(corner => {
+            const p = this.svgElement.createSVGPoint();
+            p.x = corner.x;
+            p.y = corner.y;
+            return p.matrixTransform(rectScreenCTM);
+        });
+        
+        // Calculate distance to the four edges
+        const edges = [
+            [cornersScreen[0], cornersScreen[1]], // top
+            [cornersScreen[1], cornersScreen[2]], // right
+            [cornersScreen[2], cornersScreen[3]], // bottom
+            [cornersScreen[3], cornersScreen[0]]  // left
+        ];
+        
+        let minDistance = Infinity;
+        edges.forEach(([p1, p2]) => {
+            const distance = this.distanceToLineSegment(screenX, screenY, p1.x, p1.y, p2.x, p2.y);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        });
+        
+        return minDistance;
+    }
+    
+    getDistanceToEllipse(ellipse, point) {
+        // Get ellipse properties
+        const cx = parseFloat(ellipse.getAttribute('cx')) || 0;
+        const cy = parseFloat(ellipse.getAttribute('cy')) || 0;
+        const rx = parseFloat(ellipse.getAttribute('rx')) || 0;
+        const ry = parseFloat(ellipse.getAttribute('ry')) || 0;
+        
+        if (rx === 0 || ry === 0) return Infinity;
+        
+        // Transform ellipse center from local coordinates to SVG coordinates
+        const ellipseCTM = ellipse.getCTM();
+        if (!ellipseCTM) return Infinity;
+        
+        const centerPoint = this.svgElement.createSVGPoint();
+        centerPoint.x = cx;
+        centerPoint.y = cy;
+        const centerSVG = centerPoint.matrixTransform(ellipseCTM);
+        
+        // For ellipses, we approximate by sampling points along the ellipse
+        // This is a simplified approach - for better accuracy, we'd need to solve
+        // the ellipse equation more precisely
+        let minDistance = Infinity;
+        const samples = 64;
+        
+        for (let i = 0; i < samples; i++) {
+            const angle = (i * 2 * Math.PI) / samples;
+            const px = cx + rx * Math.cos(angle);
+            const py = cy + ry * Math.sin(angle);
+            
+            const p = this.svgElement.createSVGPoint();
+            p.x = px;
+            p.y = py;
+            const pSVG = p.matrixTransform(ellipseCTM);
+            
+            const dx = point.x - pSVG.x;
+            const dy = point.y - pSVG.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
+    }
+    
+    getDistanceToEllipseScreen(ellipse, svgPoint, screenX, screenY) {
+        // Get ellipse properties
+        const cx = parseFloat(ellipse.getAttribute('cx')) || 0;
+        const cy = parseFloat(ellipse.getAttribute('cy')) || 0;
+        const rx = parseFloat(ellipse.getAttribute('rx')) || 0;
+        const ry = parseFloat(ellipse.getAttribute('ry')) || 0;
+        
+        if (rx === 0 || ry === 0) return Infinity;
+        
+        // Transform ellipse center to screen coordinates
+        const ellipseScreenCTM = ellipse.getScreenCTM();
+        if (!ellipseScreenCTM) return Infinity;
+        
+        const centerPoint = this.svgElement.createSVGPoint();
+        centerPoint.x = cx;
+        centerPoint.y = cy;
+        const centerScreen = centerPoint.matrixTransform(ellipseScreenCTM);
+        
+        // Sample points along the ellipse
+        let minDistance = Infinity;
+        const samples = 64;
+        
+        for (let i = 0; i < samples; i++) {
+            const angle = (i * 2 * Math.PI) / samples;
+            const px = cx + rx * Math.cos(angle);
+            const py = cy + ry * Math.sin(angle);
+            
+            const p = this.svgElement.createSVGPoint();
+            p.x = px;
+            p.y = py;
+            const pScreen = p.matrixTransform(ellipseScreenCTM);
+            
+            const dx = screenX - pScreen.x;
+            const dy = screenY - pScreen.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+        
+        return minDistance;
     }
     
     parsePathData(pathData) {
