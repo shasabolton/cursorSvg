@@ -22,6 +22,10 @@ class SVGEditor {
         this.dpi = parseFloat(localStorage.getItem('svgEditorDPI')) || 96;
         this.transformUnit = localStorage.getItem('svgEditorTransformUnit') || 'px';
         
+        // Load arrow key increments from localStorage or use defaults
+        this.arrowKeyIncrement = parseFloat(localStorage.getItem('svgEditorArrowKeyIncrement')) || 1;
+        this.shiftArrowKeyIncrement = parseFloat(localStorage.getItem('svgEditorShiftArrowKeyIncrement')) || 10;
+        
         // Zoom and pan state
         this.zoomLevel = 1.0;
         this.panOffset = { x: 0, y: 0 };
@@ -467,6 +471,33 @@ class SVGEditor {
     
     setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
+            // Arrow keys to move selected elements (only if not typing in an input)
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                // Check if user is typing in an input field
+                const isInputFocused = e.target.tagName === 'INPUT' || 
+                                       e.target.tagName === 'TEXTAREA' ||
+                                       e.target.isContentEditable;
+                
+                // Only move elements if:
+                // 1. Elements are selected
+                // 2. User is not typing in an input field
+                // 3. Settings dialog is not open
+                const settingsDialog = document.getElementById('settingsDialog');
+                const isSettingsOpen = settingsDialog && settingsDialog.style.display !== 'none';
+                
+                if (this.selectedElements.size > 0 && !isInputFocused && !isSettingsOpen) {
+                    e.preventDefault();
+                    const increment = e.shiftKey ? this.shiftArrowKeyIncrement : this.arrowKeyIncrement;
+                    this.moveSelectedElementsWithArrowKeys(e.key, increment);
+                    return;
+                }
+            }
+            
+            // Don't handle other shortcuts if user is typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                return;
+            }
+            
             // Ctrl+O for Open
             if (e.ctrlKey && e.key === 'o') {
                 e.preventDefault();
@@ -479,6 +510,88 @@ class SVGEditor {
                 this.saveSVG();
             }
         });
+    }
+    
+    moveSelectedElementsWithArrowKeys(key, increment) {
+        let deltaX = 0;
+        let deltaY = 0;
+        
+        switch (key) {
+            case 'ArrowUp':
+                deltaY = -increment;
+                break;
+            case 'ArrowDown':
+                deltaY = increment;
+                break;
+            case 'ArrowLeft':
+                deltaX = -increment;
+                break;
+            case 'ArrowRight':
+                deltaX = increment;
+                break;
+        }
+        
+        // Check if we're in direct-select mode with selected nodes
+        if (this.currentTool === 'direct-select' && this.selectedNodes.size > 0) {
+            // Move selected nodes
+            this.moveSelectedNodesWithArrowKeys(deltaX, deltaY);
+        } else if (this.selectedElements.size > 0) {
+            // Move selected elements
+            this.selectedElements.forEach(element => {
+                const transform = this.getElementTransform(element);
+                this.moveElement(element, transform.x + deltaX, transform.y + deltaY);
+            });
+        }
+        
+        // Update layers panel and transform panel if open
+        this.renderLayersPanel();
+        if (this.isTransforming) {
+            this.updateBoundingBox();
+        }
+    }
+    
+    moveSelectedNodesWithArrowKeys(deltaX, deltaY) {
+        // Collect all affected elements first
+        const affectedElements = new Set();
+        
+        // Move all selected nodes by the delta
+        this.selectedNodes.forEach(nodeId => {
+            const nodeInfo = this.parseNodeId(nodeId);
+            if (!nodeInfo) return;
+            
+            const { element, index, pointType } = nodeInfo;
+            
+            // Track which elements are affected
+            if (element) {
+                affectedElements.add(element);
+            }
+            
+            // Get current position of the node
+            const currentPos = this.getNodePosition(nodeInfo);
+            if (!currentPos) return;
+            
+            // Calculate new position
+            const newX = currentPos.x + deltaX;
+            const newY = currentPos.y + deltaY;
+            
+            // Move the node
+            if (element.tagName === 'path') {
+                this.moveNode(element, index, newX, newY, pointType);
+            } else {
+                // For non-path elements, we might need different handling
+                // For now, skip non-path elements
+            }
+        });
+        
+        // Update node handles to reflect new positions
+        // Refresh handles for all affected elements (selection state is preserved)
+        affectedElements.forEach(element => {
+            // Refresh handles - selection state will be preserved by showNodeHandles
+            this.showNodeHandles(element);
+        });
+        
+        // Update transform panel if open (shape may have changed)
+        this.updateTransformPanel();
     }
     
     setTool(tool) {
@@ -2562,6 +2675,8 @@ class SVGEditor {
         const settingsCancelBtn = document.getElementById('settingsCancelBtn');
         const settingsSaveBtn = document.getElementById('settingsSaveBtn');
         const dpiInput = document.getElementById('dpiInput');
+        const arrowKeyIncrementInput = document.getElementById('arrowKeyIncrement');
+        const shiftArrowKeyIncrementInput = document.getElementById('shiftArrowKeyIncrement');
         
         // Close dialog handlers
         const closeDialog = () => {
@@ -2581,14 +2696,37 @@ class SVGEditor {
         // Save settings
         settingsSaveBtn.addEventListener('click', () => {
             const dpi = parseFloat(dpiInput.value);
-            if (dpi && dpi > 0 && dpi <= 600) {
+            const arrowIncrement = parseFloat(arrowKeyIncrementInput.value);
+            const shiftArrowIncrement = parseFloat(shiftArrowKeyIncrementInput.value);
+            
+            let isValid = true;
+            let errorMessage = '';
+            
+            if (!dpi || dpi <= 0 || dpi > 600) {
+                isValid = false;
+                errorMessage = 'Please enter a valid DPI value between 1 and 600';
+            } else if (!arrowIncrement || arrowIncrement < 0.1) {
+                isValid = false;
+                errorMessage = 'Please enter a valid Arrow Key Increment (minimum 0.1)';
+            } else if (!shiftArrowIncrement || shiftArrowIncrement < 0.1) {
+                isValid = false;
+                errorMessage = 'Please enter a valid Shift+Arrow Key Increment (minimum 0.1)';
+            }
+            
+            if (isValid) {
                 this.dpi = dpi;
+                this.arrowKeyIncrement = arrowIncrement;
+                this.shiftArrowKeyIncrement = shiftArrowIncrement;
+                
                 localStorage.setItem('svgEditorDPI', dpi.toString());
+                localStorage.setItem('svgEditorArrowKeyIncrement', arrowIncrement.toString());
+                localStorage.setItem('svgEditorShiftArrowKeyIncrement', shiftArrowIncrement.toString());
+                
                 closeDialog();
                 // Update transform panel if it's open
                 this.updateTransformPanel();
             } else {
-                alert('Please enter a valid DPI value between 1 and 600');
+                alert(errorMessage);
             }
         });
         
@@ -2603,7 +2741,13 @@ class SVGEditor {
     openSettingsDialog() {
         const settingsDialog = document.getElementById('settingsDialog');
         const dpiInput = document.getElementById('dpiInput');
+        const arrowKeyIncrementInput = document.getElementById('arrowKeyIncrement');
+        const shiftArrowKeyIncrementInput = document.getElementById('shiftArrowKeyIncrement');
+        
         dpiInput.value = this.dpi;
+        arrowKeyIncrementInput.value = this.arrowKeyIncrement;
+        shiftArrowKeyIncrementInput.value = this.shiftArrowKeyIncrement;
+        
         settingsDialog.style.display = 'flex';
         dpiInput.focus();
         dpiInput.select();
