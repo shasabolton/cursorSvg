@@ -14,6 +14,7 @@ class SVGEditor {
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
         this.selectedNodesInitialPositions = new Map(); // Store initial positions of all selected nodes when drag starts
+        this.selectedElementsInitialTransforms = new Map(); // Store initial transforms of all selected elements when drag starts
         // proximityThreshold is now loaded from localStorage in the settings section below
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.pendingSelectionElement = null; // Track element to be selected on mouseup
@@ -926,11 +927,27 @@ class SVGEditor {
                 y: svgPoint.y
             };
             
-            // Store initial element translate transform
-            const transform = this.getElementTransform(element);
+            // Store initial transforms of all selected elements
+            // If the element is already selected and there are other selected elements, move all of them
+            this.selectedElementsInitialTransforms.clear();
+            if (this.selectedElements.has(element) && this.selectedElements.size > 1) {
+                // Store transforms for all selected elements (including the dragged one)
+                this.selectedElements.forEach(selectedEl => {
+                    const transform = this.getElementTransform(selectedEl);
+                    this.selectedElementsInitialTransforms.set(selectedEl, transform);
+                });
+            } else {
+                // Store transform for just the dragged element
+                // This happens when: element is not yet selected, or it's the only selected element
+                const transform = this.getElementTransform(element);
+                this.selectedElementsInitialTransforms.set(element, transform);
+            }
+            
+            // Store initial element translate transform for the dragged element (for compatibility)
+            const draggedElementTransform = this.selectedElementsInitialTransforms.get(element);
             this.dragOffset = {
-                x: transform.x,
-                y: transform.y
+                x: draggedElementTransform.x,
+                y: draggedElementTransform.y
             };
             
             element.classList.add('dragging');
@@ -980,10 +997,12 @@ class SVGEditor {
             const deltaX = svgPoint.x - this.dragStart.x;
             const deltaY = svgPoint.y - this.dragStart.y;
             
-            // Apply delta to initial transform
-            this.moveElement(this.currentDraggedElement, 
-                this.dragOffset.x + deltaX, 
-                this.dragOffset.y + deltaY);
+            // Move all selected elements by the same delta
+            this.selectedElementsInitialTransforms.forEach((initialTransform, el) => {
+                this.moveElement(el, 
+                    initialTransform.x + deltaX, 
+                    initialTransform.y + deltaY);
+            });
             
             // Update bounding box during drag
             this.updateBoundingBox();
@@ -1084,6 +1103,7 @@ class SVGEditor {
             }
             this.currentDraggedNode = null;
             this.selectedNodesInitialPositions.clear();
+            this.selectedElementsInitialTransforms.clear();
             this.wasDragging = false;
             // Update layers panel after drag completes
             this.renderLayersPanel();
