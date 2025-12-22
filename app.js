@@ -14,7 +14,7 @@ class SVGEditor {
         this.currentDraggedElement = null;
         this.currentDraggedNode = null;
         this.selectedNodesInitialPositions = new Map(); // Store initial positions of all selected nodes when drag starts
-        this.proximityThreshold = 10; // pixels - distance threshold for selecting paths
+        // proximityThreshold is now loaded from localStorage in the settings section below
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
@@ -25,6 +25,9 @@ class SVGEditor {
         // Load arrow key increments from localStorage or use defaults
         this.arrowKeyIncrement = parseFloat(localStorage.getItem('svgEditorArrowKeyIncrement')) || 1;
         this.shiftArrowKeyIncrement = parseFloat(localStorage.getItem('svgEditorShiftArrowKeyIncrement')) || 10;
+        
+        // Load proximity threshold from localStorage or use default
+        this.proximityThreshold = parseFloat(localStorage.getItem('svgEditorProximityThreshold')) || 10;
         
         // Zoom and pan state
         this.zoomLevel = 1.0;
@@ -2806,6 +2809,7 @@ class SVGEditor {
         const dpiInput = document.getElementById('dpiInput');
         const arrowKeyIncrementInput = document.getElementById('arrowKeyIncrement');
         const shiftArrowKeyIncrementInput = document.getElementById('shiftArrowKeyIncrement');
+        const proximityThresholdInput = document.getElementById('proximityThreshold');
         
         // Close dialog handlers
         const closeDialog = () => {
@@ -2827,6 +2831,7 @@ class SVGEditor {
             const dpi = parseFloat(dpiInput.value);
             const arrowIncrement = parseFloat(arrowKeyIncrementInput.value);
             const shiftArrowIncrement = parseFloat(shiftArrowKeyIncrementInput.value);
+            const proximityThreshold = parseFloat(proximityThresholdInput.value);
             
             let isValid = true;
             let errorMessage = '';
@@ -2840,16 +2845,21 @@ class SVGEditor {
             } else if (!shiftArrowIncrement || shiftArrowIncrement < 0.1) {
                 isValid = false;
                 errorMessage = 'Please enter a valid Shift+Arrow Key Increment (minimum 0.1)';
+            } else if (!proximityThreshold || proximityThreshold < 1) {
+                isValid = false;
+                errorMessage = 'Please enter a valid Proximity Threshold (minimum 1)';
             }
             
             if (isValid) {
                 this.dpi = dpi;
                 this.arrowKeyIncrement = arrowIncrement;
                 this.shiftArrowKeyIncrement = shiftArrowIncrement;
+                this.proximityThreshold = proximityThreshold;
                 
                 localStorage.setItem('svgEditorDPI', dpi.toString());
                 localStorage.setItem('svgEditorArrowKeyIncrement', arrowIncrement.toString());
                 localStorage.setItem('svgEditorShiftArrowKeyIncrement', shiftArrowIncrement.toString());
+                localStorage.setItem('svgEditorProximityThreshold', proximityThreshold.toString());
                 
                 closeDialog();
                 // Update transform panel if it's open
@@ -2872,10 +2882,12 @@ class SVGEditor {
         const dpiInput = document.getElementById('dpiInput');
         const arrowKeyIncrementInput = document.getElementById('arrowKeyIncrement');
         const shiftArrowKeyIncrementInput = document.getElementById('shiftArrowKeyIncrement');
+        const proximityThresholdInput = document.getElementById('proximityThreshold');
         
         dpiInput.value = this.dpi;
         arrowKeyIncrementInput.value = this.arrowKeyIncrement;
         shiftArrowKeyIncrementInput.value = this.shiftArrowKeyIncrement;
+        proximityThresholdInput.value = this.proximityThreshold;
         
         settingsDialog.style.display = 'flex';
         dpiInput.focus();
