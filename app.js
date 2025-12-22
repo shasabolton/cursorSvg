@@ -1806,7 +1806,7 @@ class SVGEditor {
                 e.preventDefault();
                 const scalePercent = parseFloat(e.target.value);
                 if (!isNaN(scalePercent) && scalePercent > 0) {
-                    this.applyScaleFromInput(scalePercent / 100);
+                    this.applyScaleFromInput(scalePercent/2 / 100);
                 }
                 // Blur the input after applying
                 e.target.blur();
@@ -1818,7 +1818,7 @@ class SVGEditor {
             if (this.isUpdatingScaleInput) return;
             const scalePercent = parseFloat(e.target.value);
             if (!isNaN(scalePercent) && scalePercent > 0) {
-                this.applyScaleFromInput(scalePercent / 100);
+                this.applyScaleFromInput(scalePercent/2 / 100);
             }
         });
     }
@@ -1934,11 +1934,6 @@ class SVGEditor {
         
         // Apply scale to all selected elements by modifying coordinates directly
         this.selectedElements.forEach(element => {
-            if (element.tagName !== 'path') {
-                // For now, only handle paths. Other elements could be added later
-                return;
-            }
-            
             // Temporarily remove transform to get untransformed bounding box and center
             const savedTransform = element.getAttribute('transform') || '';
             let centerX, centerY;
@@ -1961,52 +1956,205 @@ class SVGEditor {
                 return;
             }
             
-            // Parse path data (path coordinates are always in local space, independent of transforms)
-            const pathData = element.getAttribute('d');
-            if (!pathData) {
-                // Restore transform if no path data
-                if (savedTransform) {
-                    element.setAttribute('transform', savedTransform);
-                }
-                return;
+            // Handle different element types
+            const tagName = element.tagName.toLowerCase();
+            
+            switch (tagName) {
+                case 'path':
+                    this.scalePath(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'rect':
+                    this.scaleRect(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'circle':
+                    this.scaleCircle(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'ellipse':
+                    this.scaleEllipse(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'line':
+                    this.scaleLine(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'polyline':
+                case 'polygon':
+                    this.scalePolyline(element, centerX, centerY, scaleFactor);
+                    break;
+                case 'text':
+                    this.scaleText(element, centerX, centerY, scaleFactor);
+                    break;
+                default:
+                    // Unsupported element type, restore transform
+                    if (savedTransform) {
+                        element.setAttribute('transform', savedTransform);
+                    }
+                    return;
             }
             
-            const commands = this.parsePathData(pathData);
-            
-            // Scale all coordinates about the center
-            // Formula: newCoord = center + (coord - center) * scaleFactor
-            commands.forEach(cmd => {
-                if (cmd.type === 'M' || cmd.type === 'L') {
-                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
-                } else if (cmd.type === 'C') {
-                    cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
-                    cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
-                    cmd.x2 = centerX + (cmd.x2 - centerX) * scaleFactor;
-                    cmd.y2 = centerY + (cmd.y2 - centerY) * scaleFactor;
-                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
-                } else if (cmd.type === 'Q') {
-                    cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
-                    cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
-                    cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
-                    cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
-                }
-                // Z commands don't have coordinates, so skip them
-            });
-            
-            // Rebuild path data with scaled coordinates
-            const newPathData = this.buildPathData(commands);
-            element.setAttribute('d', newPathData);
-            
             // Remove transform since we've scaled the coordinates directly
-            // The coordinates are now in the original coordinate system, scaled
             element.removeAttribute('transform');
         });
         
         // Update bounding box and panel display
         this.updateBoundingBox();
         this.updateTransformPanel();
+    }
+    
+    scalePath(element, centerX, centerY, scaleFactor) {
+        const pathData = element.getAttribute('d');
+        if (!pathData) return;
+        
+        const commands = this.parsePathData(pathData);
+        
+        // Scale all coordinates about the center
+        commands.forEach(cmd => {
+            if (cmd.type === 'M' || cmd.type === 'L') {
+                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+            } else if (cmd.type === 'C') {
+                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
+                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
+                cmd.x2 = centerX + (cmd.x2 - centerX) * scaleFactor;
+                cmd.y2 = centerY + (cmd.y2 - centerY) * scaleFactor;
+                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+            } else if (cmd.type === 'Q') {
+                cmd.x1 = centerX + (cmd.x1 - centerX) * scaleFactor;
+                cmd.y1 = centerY + (cmd.y1 - centerY) * scaleFactor;
+                cmd.x = centerX + (cmd.x - centerX) * scaleFactor;
+                cmd.y = centerY + (cmd.y - centerY) * scaleFactor;
+            }
+        });
+        
+        const newPathData = this.buildPathData(commands);
+        element.setAttribute('d', newPathData);
+    }
+    
+    scaleRect(element, centerX, centerY, scaleFactor) {
+        const x = parseFloat(element.getAttribute('x') || 0);
+        const y = parseFloat(element.getAttribute('y') || 0);
+        const width = parseFloat(element.getAttribute('width') || 0);
+        const height = parseFloat(element.getAttribute('height') || 0);
+        
+        // Scale position and size
+        const newX = centerX + (x - centerX) * scaleFactor;
+        const newY = centerY + (y - centerY) * scaleFactor;
+        const newWidth = width * scaleFactor;
+        const newHeight = height * scaleFactor;
+        
+        element.setAttribute('x', newX);
+        element.setAttribute('y', newY);
+        element.setAttribute('width', newWidth);
+        element.setAttribute('height', newHeight);
+    }
+    
+    scaleCircle(element, centerX, centerY, scaleFactor) {
+        const cx = parseFloat(element.getAttribute('cx') || 0);
+        const cy = parseFloat(element.getAttribute('cy') || 0);
+        const r = parseFloat(element.getAttribute('r') || 0);
+        
+        // Scale center position and radius
+        const newCx = centerX + (cx - centerX) * scaleFactor;
+        const newCy = centerY + (cy - centerY) * scaleFactor;
+        const newR = r * scaleFactor;
+        
+        element.setAttribute('cx', newCx);
+        element.setAttribute('cy', newCy);
+        element.setAttribute('r', newR);
+    }
+    
+    scaleEllipse(element, centerX, centerY, scaleFactor) {
+        const cx = parseFloat(element.getAttribute('cx') || 0);
+        const cy = parseFloat(element.getAttribute('cy') || 0);
+        const rx = parseFloat(element.getAttribute('rx') || 0);
+        const ry = parseFloat(element.getAttribute('ry') || 0);
+        
+        // Scale center position and radii
+        const newCx = centerX + (cx - centerX) * scaleFactor;
+        const newCy = centerY + (cy - centerY) * scaleFactor;
+        const newRx = rx * scaleFactor;
+        const newRy = ry * scaleFactor;
+        
+        element.setAttribute('cx', newCx);
+        element.setAttribute('cy', newCy);
+        element.setAttribute('rx', newRx);
+        element.setAttribute('ry', newRy);
+    }
+    
+    scaleLine(element, centerX, centerY, scaleFactor) {
+        const x1 = parseFloat(element.getAttribute('x1') || 0);
+        const y1 = parseFloat(element.getAttribute('y1') || 0);
+        const x2 = parseFloat(element.getAttribute('x2') || 0);
+        const y2 = parseFloat(element.getAttribute('y2') || 0);
+        
+        // Scale both endpoints about the center
+        const newX1 = centerX + (x1 - centerX) * scaleFactor;
+        const newY1 = centerY + (y1 - centerY) * scaleFactor;
+        const newX2 = centerX + (x2 - centerX) * scaleFactor;
+        const newY2 = centerY + (y2 - centerY) * scaleFactor;
+        
+        element.setAttribute('x1', newX1);
+        element.setAttribute('y1', newY1);
+        element.setAttribute('x2', newX2);
+        element.setAttribute('y2', newY2);
+    }
+    
+    scalePolyline(element, centerX, centerY, scaleFactor) {
+        const pointsAttr = element.getAttribute('points');
+        if (!pointsAttr) return;
+        
+        // Parse points: "x1,y1 x2,y2" or "x1 y1 x2 y2" format
+        const points = pointsAttr.trim().split(/[\s,]+/).map(parseFloat);
+        const scaledPoints = [];
+        
+        for (let i = 0; i < points.length; i += 2) {
+            const x = points[i];
+            const y = points[i + 1];
+            if (isNaN(x) || isNaN(y)) continue;
+            
+            const newX = centerX + (x - centerX) * scaleFactor;
+            const newY = centerY + (y - centerY) * scaleFactor;
+            scaledPoints.push(newX, newY);
+        }
+        
+        // Rebuild points string in "x,y x,y" format
+        const newPoints = [];
+        for (let i = 0; i < scaledPoints.length; i += 2) {
+            newPoints.push(`${scaledPoints[i]},${scaledPoints[i + 1]}`);
+        }
+        element.setAttribute('points', newPoints.join(' '));
+    }
+    
+    scaleText(element, centerX, centerY, scaleFactor) {
+        // Scale x and y position attributes
+        const xAttr = element.getAttribute('x');
+        const yAttr = element.getAttribute('y');
+        
+        if (xAttr !== null) {
+            const xValues = xAttr.split(/[\s,]+/).map(val => {
+                const x = parseFloat(val);
+                if (isNaN(x)) return val;
+                return centerX + (x - centerX) * scaleFactor;
+            });
+            element.setAttribute('x', xValues.join(' '));
+        }
+        
+        if (yAttr !== null) {
+            const yValues = yAttr.split(/[\s,]+/).map(val => {
+                const y = parseFloat(val);
+                if (isNaN(y)) return val;
+                return centerY + (y - centerY) * scaleFactor;
+            });
+            element.setAttribute('y', yValues.join(' '));
+        }
+        
+        // Also scale font-size if present
+        const fontSize = element.getAttribute('font-size');
+        if (fontSize) {
+            const size = parseFloat(fontSize);
+            if (!isNaN(size)) {
+                element.setAttribute('font-size', size * scaleFactor);
+            }
+        }
     }
     
     setupSettingsDialog() {
