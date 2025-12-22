@@ -16,6 +16,8 @@ class SVGEditor {
         this.selectedNodesInitialPositions = new Map(); // Store initial positions of all selected nodes when drag starts
         // proximityThreshold is now loaded from localStorage in the settings section below
         this.proximitySelectedElement = null; // Track element selected via proximity
+        this.pendingSelectionElement = null; // Track element to be selected on mouseup
+        this.pendingSelectionMultiSelect = false; // Track if pending selection is multi-select
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
         // Load DPI from localStorage or use default (96 DPI is standard)
@@ -864,21 +866,20 @@ class SVGEditor {
                  target.tagName === 'line' || target.tagName === 'polyline' || 
                  target.tagName === 'polygon')) {
                 e.stopPropagation();
-                if (!this.wasDragging && this.currentTool === 'select') {
-                    // Selection already happened in mousedown, just update UI
-                    this.renderLayersPanel();
-                }
+                // Selection happens in mouseup, not click
                 // Clear proximity tracking since we have a direct hit
                 this.proximitySelectedElement = null;
-            } else if (target === this.svgElement && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-                // Don't clear selection if we just selected an element via proximity
-                if (!this.proximitySelectedElement) {
+            } else if (target === this.svgElement) {
+                // Handle clicks on the SVG canvas (not on elements)
+                const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+                if (this.proximitySelectedElement) {
+                    // Element was selected via proximity, selection happens in mouseup
+                    // Just clear tracking
+                    this.proximitySelectedElement = null;
+                } else if (!isMultiSelect && !this.wasDragging) {
+                    // Only clear selection if modifier keys are NOT pressed and it wasn't a drag
                     this.clearSelection();
                     this.renderLayersPanel();
-                } else {
-                    // Element was selected via proximity, just update UI and clear tracking
-                    this.renderLayersPanel();
-                    this.proximitySelectedElement = null;
                 }
             }
         });
@@ -900,15 +901,14 @@ class SVGEditor {
         this.wasDragging = false;
         this.dragStartPos = { x: e.clientX, y: e.clientY };
         
+        // Store pending selection to be applied on mouseup (if not a drag)
+        const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+        this.pendingSelectionElement = element;
+        this.pendingSelectionMultiSelect = isMultiSelect;
+        
         if (this.currentTool === 'select') {
-            // Select immediately on mousedown
-            const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-            if (!isMultiSelect && !this.selectedElements.has(element)) {
-                this.clearSelection();
-            }
-            this.selectElement(element, isMultiSelect);
-            this.renderLayersPanel();
-            
+            // Don't select yet - wait for mouseup
+            // But prepare for dragging
             this.isDragging = true;
             this.currentDraggedElement = element;
             
@@ -933,10 +933,8 @@ class SVGEditor {
             
             element.classList.add('dragging');
         } else if (this.currentTool === 'direct-select') {
-            const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-            this.selectElement(element, isMultiSelect);
-            this.renderLayersPanel();
-            this.showNodeHandles(element);
+            // Don't select yet - wait for mouseup
+            // Direct select doesn't drag, so no drag setup needed
         }
     }
     
@@ -1044,14 +1042,26 @@ class SVGEditor {
     }
     
     handleMouseUp(e) {
+        // Handle selection on mouseup (if it wasn't a drag)
+        if (this.pendingSelectionElement && !this.wasDragging) {
+            if (this.currentTool === 'select' || this.currentTool === 'direct-select') {
+                this.selectElement(this.pendingSelectionElement, this.pendingSelectionMultiSelect);
+                this.renderLayersPanel();
+                
+                if (this.currentTool === 'direct-select') {
+                    this.showNodeHandles(this.pendingSelectionElement);
+                }
+            }
+        }
+        
+        // Clear pending selection
+        this.pendingSelectionElement = null;
+        this.pendingSelectionMultiSelect = false;
+        
         if (this.isDragging) {
             this.isDragging = false;
             if (this.currentDraggedElement) {
                 this.currentDraggedElement.classList.remove('dragging');
-                // Ensure the element remains selected after drag
-                if (this.proximitySelectedElement === this.currentDraggedElement) {
-                    this.selectElement(this.currentDraggedElement, false);
-                }
                 this.currentDraggedElement = null;
             }
             this.currentDraggedNode = null;
