@@ -18,6 +18,8 @@ class SVGEditor {
         this.proximitySelectedElement = null; // Track element selected via proximity
         this.pendingSelectionElement = null; // Track element to be selected on mouseup
         this.pendingSelectionMultiSelect = false; // Track if pending selection is multi-select
+        this.pendingSelectionNode = null; // Track node handle to be selected on mouseup
+        this.pendingSelectionNodeMultiSelect = false; // Track if pending node selection is multi-select
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
         // Load DPI from localStorage or use default (96 DPI is standard)
@@ -986,6 +988,15 @@ class SVGEditor {
             // Update bounding box during drag
             this.updateBoundingBox();
         } else if (this.currentTool === 'direct-select' && this.isDragging && this.currentDraggedNode) {
+            // Check if we've moved enough to consider it a drag
+            const moveThreshold = 3;
+            const movedX = Math.abs(e.clientX - this.dragStartPos.x);
+            const movedY = Math.abs(e.clientY - this.dragStartPos.y);
+            
+            if (movedX > moveThreshold || movedY > moveThreshold) {
+                this.wasDragging = true;
+            }
+            
             const rect = this.svgElement.getBoundingClientRect();
             const point = this.svgElement.createSVGPoint();
             point.x = e.clientX;
@@ -1042,7 +1053,7 @@ class SVGEditor {
     }
     
     handleMouseUp(e) {
-        // Handle selection on mouseup (if it wasn't a drag)
+        // Handle element selection on mouseup (if it wasn't a drag)
         if (this.pendingSelectionElement && !this.wasDragging) {
             if (this.currentTool === 'select' || this.currentTool === 'direct-select') {
                 this.selectElement(this.pendingSelectionElement, this.pendingSelectionMultiSelect);
@@ -1054,9 +1065,16 @@ class SVGEditor {
             }
         }
         
-        // Clear pending selection
+        // Handle node selection on mouseup (if it wasn't a drag)
+        if (this.pendingSelectionNode && !this.wasDragging) {
+            this.selectNode(this.pendingSelectionNode, this.pendingSelectionNodeMultiSelect);
+        }
+        
+        // Clear pending selections
         this.pendingSelectionElement = null;
         this.pendingSelectionMultiSelect = false;
+        this.pendingSelectionNode = null;
+        this.pendingSelectionNodeMultiSelect = false;
         
         if (this.isDragging) {
             this.isDragging = false;
@@ -1326,7 +1344,13 @@ class SVGEditor {
                 handle.addEventListener('mousedown', (e) => {
                     e.stopPropagation();
                     const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-                    this.selectNode(handle, isMultiSelect);
+                    // Store pending selection to be applied on mouseup (if not a drag)
+                    this.pendingSelectionNode = handle;
+                    this.pendingSelectionNodeMultiSelect = isMultiSelect;
+                    this.wasDragging = false;
+                    this.dragStartPos = { x: e.clientX, y: e.clientY };
+                    
+                    // Prepare for dragging
                     this.isDragging = true;
                     this.currentDraggedNode = {
                         element: element,
@@ -1371,7 +1395,13 @@ class SVGEditor {
                     cp1.addEventListener('mousedown', (e) => {
                         e.stopPropagation();
                         const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-                        this.selectNode(cp1, isMultiSelect);
+                        // Store pending selection to be applied on mouseup (if not a drag)
+                        this.pendingSelectionNode = cp1;
+                        this.pendingSelectionNodeMultiSelect = isMultiSelect;
+                        this.wasDragging = false;
+                        this.dragStartPos = { x: e.clientX, y: e.clientY };
+                        
+                        // Prepare for dragging
                         this.isDragging = true;
                         this.currentDraggedNode = {
                             element: element,
@@ -1387,7 +1417,7 @@ class SVGEditor {
                             if (nodeInfo) {
                                 const pos = this.getNodePosition(nodeInfo);
                                 if (pos) {
-                                    this.selectedNodesInitialPositions.set(nodeId, pos);
+                                    this.selectedNodesInitialPositions.set(nodeId, { nodeInfo, pos });
                                 }
                             }
                         });
@@ -1415,7 +1445,13 @@ class SVGEditor {
                     cp2.addEventListener('mousedown', (e) => {
                         e.stopPropagation();
                         const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-                        this.selectNode(cp2, isMultiSelect);
+                        // Store pending selection to be applied on mouseup (if not a drag)
+                        this.pendingSelectionNode = cp2;
+                        this.pendingSelectionNodeMultiSelect = isMultiSelect;
+                        this.wasDragging = false;
+                        this.dragStartPos = { x: e.clientX, y: e.clientY };
+                        
+                        // Prepare for dragging
                         this.isDragging = true;
                         this.currentDraggedNode = {
                             element: element,
@@ -1431,7 +1467,7 @@ class SVGEditor {
                             if (nodeInfo) {
                                 const pos = this.getNodePosition(nodeInfo);
                                 if (pos) {
-                                    this.selectedNodesInitialPositions.set(nodeId, pos);
+                                    this.selectedNodesInitialPositions.set(nodeId, { nodeInfo, pos });
                                 }
                             }
                         });
@@ -1476,7 +1512,12 @@ class SVGEditor {
             handle.addEventListener('mousedown', (e) => {
                 e.stopPropagation();
                 const isMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-                this.selectNode(handle, isMultiSelect);
+                // Store pending selection to be applied on mouseup (if not a drag)
+                this.pendingSelectionNode = handle;
+                this.pendingSelectionNodeMultiSelect = isMultiSelect;
+                this.wasDragging = false;
+                this.dragStartPos = { x: e.clientX, y: e.clientY };
+                
                 // For non-path elements, we'll move the entire element
                 this.isDragging = true;
                 this.currentDraggedElement = element;
