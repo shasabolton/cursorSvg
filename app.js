@@ -1243,7 +1243,6 @@ class SVGEditor {
     }
     
     endMarqueeSelection() {
-        console.log("endMarqueeSelection");
         if (!this.isMarqueeSelecting || !this.marqueeRect) return;
         
         // Get the final marquee rectangle bounds (already in SVG root coordinates)
@@ -1307,6 +1306,7 @@ class SVGEditor {
                         // With modifier keys: toggles selection (adds if not selected, removes if selected)
                         // Without modifier keys: adds to selection (selection was already cleared above)
                         this.selectElement(element, true);
+                        console.log("selectedElement:",element)
                     }
                 } catch (e) {
                     // Skip elements that don't support getBBox or have other errors
