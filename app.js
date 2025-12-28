@@ -53,6 +53,11 @@ class SVGEditor {
         this.transformStartElementData = new Map(); // Store original element data for scaling
         this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
+        // Marquee selection state
+        this.isMarqueeSelecting = false;
+        this.marqueeRect = null;
+        this.marqueeStart = { x: 0, y: 0 };
+        
         this.init();
     }
     
@@ -89,6 +94,10 @@ class SVGEditor {
         
         document.getElementById('directSelectTool').addEventListener('click', () => {
             this.setTool('direct-select');
+        });
+        
+        document.getElementById('marqueeSelectTool').addEventListener('click', () => {
+            this.setTool('marquee-select');
         });
         
         // Setup tooltips
@@ -615,6 +624,11 @@ class SVGEditor {
         if (tool === 'select') {
             this.clearNodeHandles();
         }
+        
+        // Clear marquee selection when switching away from marquee-select tool
+        if (tool !== 'marquee-select' && this.isMarqueeSelecting) {
+            this.endMarqueeSelection();
+        }
     }
     
     async loadSVG(file) {
@@ -817,6 +831,30 @@ class SVGEditor {
                 return;
             }
             
+            // Ignore marquee selection rectangle
+            if (target && (target.closest && target.closest('#marqueeSelectGroup'))) {
+                return;
+            }
+            
+            // Handle marquee select tool
+            if (this.currentTool === 'marquee-select') {
+                // Check if clicking on an element or on the canvas
+                if (target && target !== this.svgElement && 
+                    (target.tagName === 'path' || target.tagName === 'circle' || 
+                     target.tagName === 'rect' || target.tagName === 'ellipse' || 
+                     target.tagName === 'line' || target.tagName === 'polyline' || 
+                     target.tagName === 'polygon')) {
+                    // Clicked on an element - don't start marquee selection
+                    e.stopPropagation();
+                    return;
+                }
+                
+                // Clicked on canvas - start marquee selection
+                e.stopPropagation();
+                this.startMarqueeSelection(e);
+                return;
+            }
+            
             // First check for direct hit
             if (target && target !== this.svgElement && 
                 (target.tagName === 'path' || target.tagName === 'circle' || 
@@ -835,6 +873,8 @@ class SVGEditor {
                     // Skip bounding box elements
                     if (el.closest && el.closest('#boundingBoxGroup')) return false;
                     if (el.classList && (el.classList.contains('bbox-handle') || el.classList.contains('bbox-rotation-handle'))) return false;
+                    // Skip marquee selection elements
+                    if (el.closest && el.closest('#marqueeSelectGroup')) return false;
                     return el !== this.svgElement && 
                            (el.tagName === 'path' || el.tagName === 'line' || 
                             el.tagName === 'polyline' || el.tagName === 'polygon' ||
@@ -972,6 +1012,12 @@ class SVGEditor {
                 this.panOffset.y = this.panStartOffset.y + deltaY;
                 this.applyTransform();
             }
+            return;
+        }
+        
+        // Handle marquee selection
+        if (this.isMarqueeSelecting) {
+            this.updateMarqueeSelection(e);
             return;
         }
         
@@ -1126,6 +1172,87 @@ class SVGEditor {
             this.isTransforming = false;
             this.transformHandle = null;
         }
+        
+        // Handle marquee selection end
+        if (this.isMarqueeSelecting) {
+            this.endMarqueeSelection();
+        }
+    }
+    
+    startMarqueeSelection(e) {
+        if (!this.svgElement) return;
+        
+        // Convert mouse position to SVG coordinates
+        const point = this.svgElement.createSVGPoint();
+        point.x = e.clientX;
+        point.y = e.clientY;
+        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+        
+        // Store starting position
+        this.marqueeStart = { x: svgPoint.x, y: svgPoint.y };
+        this.isMarqueeSelecting = true;
+        
+        // Create or get marquee group (similar to bounding box group)
+        let marqueeGroup = this.svgElement.querySelector('#marqueeSelectGroup');
+        if (!marqueeGroup) {
+            marqueeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            marqueeGroup.id = 'marqueeSelectGroup';
+            marqueeGroup.style.pointerEvents = 'none';
+            this.svgElement.appendChild(marqueeGroup);
+        } else {
+            // Clear existing contents
+            marqueeGroup.innerHTML = '';
+        }
+        
+        // Create the rectangle element
+        this.marqueeRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        this.marqueeRect.setAttribute('stroke', '#0078d4');
+        this.marqueeRect.setAttribute('stroke-width', '1');
+        this.marqueeRect.setAttribute('stroke-dasharray', '4,4');
+        this.marqueeRect.setAttribute('fill', 'none');
+        this.marqueeRect.setAttribute('x', svgPoint.x);
+        this.marqueeRect.setAttribute('y', svgPoint.y);
+        this.marqueeRect.setAttribute('width', '0');
+        this.marqueeRect.setAttribute('height', '0');
+        
+        marqueeGroup.appendChild(this.marqueeRect);
+    }
+    
+    updateMarqueeSelection(e) {
+        if (!this.svgElement || !this.marqueeRect) return;
+        
+        // Convert current mouse position to SVG coordinates
+        const point = this.svgElement.createSVGPoint();
+        point.x = e.clientX;
+        point.y = e.clientY;
+        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
+        
+        // Calculate rectangle dimensions (can go in any direction)
+        const x = Math.min(this.marqueeStart.x, svgPoint.x);
+        const y = Math.min(this.marqueeStart.y, svgPoint.y);
+        const width = Math.abs(svgPoint.x - this.marqueeStart.x);
+        const height = Math.abs(svgPoint.y - this.marqueeStart.y);
+        
+        // Update rectangle attributes
+        this.marqueeRect.setAttribute('x', x);
+        this.marqueeRect.setAttribute('y', y);
+        this.marqueeRect.setAttribute('width', width);
+        this.marqueeRect.setAttribute('height', height);
+    }
+    
+    endMarqueeSelection() {
+        if (!this.isMarqueeSelecting) return;
+        
+        // Remove the marquee rectangle
+        const marqueeGroup = this.svgElement.querySelector('#marqueeSelectGroup');
+        if (marqueeGroup) {
+            marqueeGroup.remove();
+        }
+        
+        // Reset state
+        this.isMarqueeSelecting = false;
+        this.marqueeRect = null;
+        this.marqueeStart = { x: 0, y: 0 };
     }
     
     setupZoomAndPan() {
