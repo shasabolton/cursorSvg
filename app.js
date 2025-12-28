@@ -57,6 +57,7 @@ class SVGEditor {
         this.isMarqueeSelecting = false;
         this.marqueeRect = null;
         this.marqueeStart = { x: 0, y: 0 };
+        this.marqueeMultiSelect = false;
         
         this.init();
     }
@@ -1188,8 +1189,9 @@ class SVGEditor {
         point.y = e.clientY;
         const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
         
-        // Store starting position
+        // Store starting position and modifier key state
         this.marqueeStart = { x: svgPoint.x, y: svgPoint.y };
+        this.marqueeMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
         this.isMarqueeSelecting = true;
         
         // Create or get marquee group (similar to bounding box group)
@@ -1241,7 +1243,79 @@ class SVGEditor {
     }
     
     endMarqueeSelection() {
-        if (!this.isMarqueeSelecting) return;
+        console.log("endMarqueeSelection");
+        if (!this.isMarqueeSelecting || !this.marqueeRect) return;
+        
+        // Get the final marquee rectangle bounds (already in SVG root coordinates)
+        const marqueeX = parseFloat(this.marqueeRect.getAttribute('x'));
+        const marqueeY = parseFloat(this.marqueeRect.getAttribute('y'));
+        const marqueeWidth = parseFloat(this.marqueeRect.getAttribute('width'));
+        const marqueeHeight = parseFloat(this.marqueeRect.getAttribute('height'));
+        
+        // Only select if the marquee rectangle has a valid size
+        if (marqueeWidth > 0 && marqueeHeight > 0) {
+            // Get all selectable elements
+            const allElements = this.svgElement.querySelectorAll('path, circle, rect, ellipse, line, polyline, polygon');
+            
+            // Clear current selection only if not using modifier keys (add to selection)
+            if (!this.marqueeMultiSelect) {
+                this.clearSelection();
+            }
+            
+            // Select elements that intersect with the marquee rectangle
+            allElements.forEach(element => {
+                // Skip elements that are in the bounding box or marquee groups
+                if (element.closest && (element.closest('#boundingBoxGroup') || element.closest('#marqueeSelectGroup'))) {
+                    return;
+                }
+                
+                try {
+                    // Get element's bounding box
+                    const bbox = element.getBBox();
+                    
+                    // Convert all four corners of the element's bounding box to root coordinates
+                    const corners = [
+                        { x: bbox.x, y: bbox.y }, // top-left
+                        { x: bbox.x + bbox.width, y: bbox.y }, // top-right
+                        { x: bbox.x + bbox.width, y: bbox.y + bbox.height }, // bottom-right
+                        { x: bbox.x, y: bbox.y + bbox.height } // bottom-left
+                    ];
+                    
+                    // Convert corners to root coordinates
+                    const rootCorners = corners.map(corner => this.toRootCoords(element, corner.x, corner.y));
+                    
+                    // Find bounding box in root coordinates
+                    let minX = Infinity, minY = Infinity;
+                    let maxX = -Infinity, maxY = -Infinity;
+                    rootCorners.forEach(corner => {
+                        minX = Math.min(minX, corner.x);
+                        minY = Math.min(minY, corner.y);
+                        maxX = Math.max(maxX, corner.x);
+                        maxY = Math.max(maxY, corner.y);
+                    });
+                    
+                    // Check if element's bounding box intersects with marquee rectangle
+                    const elementWidth = maxX - minX;
+                    const elementHeight = maxY - minY;
+                    
+                    // Rectangle intersection check
+                    if (minX < marqueeX + marqueeWidth &&
+                        minX + elementWidth > marqueeX &&
+                        minY < marqueeY + marqueeHeight &&
+                        minY + elementHeight > marqueeY) {
+                        // Element intersects with marquee rectangle - select it
+                        // With modifier keys: toggles selection (adds if not selected, removes if selected)
+                        // Without modifier keys: adds to selection (selection was already cleared above)
+                        this.selectElement(element, true);
+                    }
+                } catch (e) {
+                    // Skip elements that don't support getBBox or have other errors
+                }
+            });
+            
+            // Update layers panel after selection
+            this.renderLayersPanel();
+        }
         
         // Remove the marquee rectangle
         const marqueeGroup = this.svgElement.querySelector('#marqueeSelectGroup');
@@ -1253,6 +1327,7 @@ class SVGEditor {
         this.isMarqueeSelecting = false;
         this.marqueeRect = null;
         this.marqueeStart = { x: 0, y: 0 };
+        this.marqueeMultiSelect = false;
     }
     
     setupZoomAndPan() {
