@@ -54,6 +54,7 @@ class SVGEditor {
         this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
         // Marquee selection state
+        this.marqueeModeEnabled = false; // Toggle for marquee mode (works with select/direct-select)
         this.isMarqueeSelecting = false;
         this.marqueeRect = null;
         this.marqueeStart = { x: 0, y: 0 };
@@ -99,7 +100,7 @@ class SVGEditor {
         });
         
         document.getElementById('marqueeSelectTool').addEventListener('click', () => {
-            this.setTool('marquee-select');
+            this.toggleMarqueeMode();
         });
         
         // Setup tooltips
@@ -616,19 +617,50 @@ class SVGEditor {
     setTool(tool) {
         this.currentTool = tool;
         
-        // Update UI
+        // Update UI - but preserve marquee button state if marquee mode is enabled
         document.querySelectorAll('.tool-palette-btn').forEach(btn => {
+            // Don't remove active class from marquee button if marquee mode is enabled
+            if (btn.id === 'marqueeSelectTool' && this.marqueeModeEnabled) {
+                return;
+            }
             btn.classList.remove('active');
         });
         document.querySelector(`[data-tool="${tool}"]`).classList.add('active');
+        
+        // Ensure marquee button shows active state if marquee mode is enabled
+        if (this.marqueeModeEnabled) {
+            const marqueeBtn = document.getElementById('marqueeSelectTool');
+            if (marqueeBtn) {
+                marqueeBtn.classList.add('active');
+            }
+        }
         
         // Clear node handles when switching tools
         if (tool === 'select') {
             this.clearNodeHandles();
         }
         
-        // Clear marquee selection when switching away from marquee-select tool
-        if (tool !== 'marquee-select' && this.isMarqueeSelecting) {
+        // Clear marquee selection when switching tools (but keep marquee mode enabled if it was)
+        if (this.isMarqueeSelecting) {
+            this.endMarqueeSelection();
+        }
+    }
+    
+    toggleMarqueeMode() {
+        this.marqueeModeEnabled = !this.marqueeModeEnabled;
+        
+        // Update UI
+        const marqueeBtn = document.getElementById('marqueeSelectTool');
+        if (marqueeBtn) {
+            if (this.marqueeModeEnabled) {
+                marqueeBtn.classList.add('active');
+            } else {
+                marqueeBtn.classList.remove('active');
+            }
+        }
+        
+        // Clear any active marquee selection when toggling
+        if (this.isMarqueeSelecting) {
             this.endMarqueeSelection();
         }
     }
@@ -838,8 +870,8 @@ class SVGEditor {
                 return;
             }
             
-            // Handle marquee select tool
-            if (this.currentTool === 'marquee-select') {
+            // Handle marquee mode (works with select or direct-select tools)
+            if (this.marqueeModeEnabled && (this.currentTool === 'select' || this.currentTool === 'direct-select')) {
                 // Check if clicking on an element or on the canvas
                 if (target && target !== this.svgElement && 
                     (target.tagName === 'path' || target.tagName === 'circle' || 
@@ -1276,74 +1308,13 @@ class SVGEditor {
         
         // Only select if the marquee rectangle has a valid size
         if (marqueeWidth > 0 && marqueeHeight > 0) {
-            // Get all selectable elements
-            const allElements = this.svgElement.querySelectorAll('path, circle, rect, ellipse, line, polyline, polygon');
-            
-            // Clear current selection only if not using modifier keys (add to selection)
-            if (!this.marqueeMultiSelect) {
-                this.clearSelection();
+            if (this.currentTool === 'direct-select') {
+                // Direct-select mode: select nodes from currently selected paths
+                this.selectNodesInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight);
+            } else {
+                // Select mode: select paths/elements
+                this.selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight);
             }
-            
-            // Collect elements that intersect with the marquee rectangle
-            const elementsToSelect = [];
-            allElements.forEach(element => {
-                // Skip elements that are in the bounding box or marquee groups
-                if (element.closest && (element.closest('#boundingBoxGroup') || element.closest('#marqueeSelectGroup'))) {
-                    return;
-                }
-                
-                try {
-                    // Get element's bounding box
-                    const bbox = element.getBBox();
-                    
-                    // Convert all four corners of the element's bounding box to root coordinates
-                    const corners = [
-                        { x: bbox.x, y: bbox.y }, // top-left
-                        { x: bbox.x + bbox.width, y: bbox.y }, // top-right
-                        { x: bbox.x + bbox.width, y: bbox.y + bbox.height }, // bottom-right
-                        { x: bbox.x, y: bbox.y + bbox.height } // bottom-left
-                    ];
-                    
-                    // Convert corners to root coordinates
-                    const rootCorners = corners.map(corner => this.toRootCoords(element, corner.x, corner.y));
-                    
-                    // Find bounding box in root coordinates
-                    let minX = Infinity, minY = Infinity;
-                    let maxX = -Infinity, maxY = -Infinity;
-                    rootCorners.forEach(corner => {
-                        minX = Math.min(minX, corner.x);
-                        minY = Math.min(minY, corner.y);
-                        maxX = Math.max(maxX, corner.x);
-                        maxY = Math.max(maxY, corner.y);
-                    });
-                    
-                    // Check if element's bounding box intersects with marquee rectangle
-                    const elementWidth = maxX - minX;
-                    const elementHeight = maxY - minY;
-                    
-                    // Rectangle intersection check
-                    if (minX < marqueeX + marqueeWidth &&
-                        minX + elementWidth > marqueeX &&
-                        minY < marqueeY + marqueeHeight &&
-                        minY + elementHeight > marqueeY) {
-                        // Element intersects with marquee rectangle
-                        elementsToSelect.push(element);
-                    }
-                } catch (e) {
-                    // Skip elements that don't support getBBox or have other errors
-                }
-            });
-            
-            // Now select all collected elements
-            elementsToSelect.forEach(element => {
-                // selectElement handles both cases:
-                // - With modifier keys: toggles selection (multiSelect=true)
-                // - Without modifier keys: adds to selection (multiSelect=true, but selection was already cleared)
-                this.selectElement(element, true);
-            });
-            
-            // Update layers panel after selection
-            this.renderLayersPanel();
         }
         
         // Remove the marquee rectangle
@@ -1360,6 +1331,184 @@ class SVGEditor {
         this.marqueeRect = null;
         this.marqueeStart = { x: 0, y: 0 };
         this.marqueeMultiSelect = false;
+    }
+    
+    selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight) {
+        // Get all selectable elements
+        const allElements = this.svgElement.querySelectorAll('path, circle, rect, ellipse, line, polyline, polygon');
+        
+        // Clear current selection only if not using modifier keys (add to selection)
+        if (!this.marqueeMultiSelect) {
+            this.clearSelection();
+        }
+        
+        // Collect elements that intersect with the marquee rectangle
+        const elementsToSelect = [];
+        allElements.forEach(element => {
+            // Skip elements that are in the bounding box or marquee groups
+            if (element.closest && (element.closest('#boundingBoxGroup') || element.closest('#marqueeSelectGroup'))) {
+                return;
+            }
+            
+            try {
+                // Get element's bounding box
+                const bbox = element.getBBox();
+                
+                // Convert all four corners of the element's bounding box to root coordinates
+                const corners = [
+                    { x: bbox.x, y: bbox.y }, // top-left
+                    { x: bbox.x + bbox.width, y: bbox.y }, // top-right
+                    { x: bbox.x + bbox.width, y: bbox.y + bbox.height }, // bottom-right
+                    { x: bbox.x, y: bbox.y + bbox.height } // bottom-left
+                ];
+                
+                // Convert corners to root coordinates
+                const rootCorners = corners.map(corner => this.toRootCoords(element, corner.x, corner.y));
+                
+                // Find bounding box in root coordinates
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                rootCorners.forEach(corner => {
+                    minX = Math.min(minX, corner.x);
+                    minY = Math.min(minY, corner.y);
+                    maxX = Math.max(maxX, corner.x);
+                    maxY = Math.max(maxY, corner.y);
+                });
+                
+                // Check if element's bounding box intersects with marquee rectangle
+                const elementWidth = maxX - minX;
+                const elementHeight = maxY - minY;
+                
+                // Rectangle intersection check
+                if (minX < marqueeX + marqueeWidth &&
+                    minX + elementWidth > marqueeX &&
+                    minY < marqueeY + marqueeHeight &&
+                    minY + elementHeight > marqueeY) {
+                    // Element intersects with marquee rectangle
+                    elementsToSelect.push(element);
+                }
+            } catch (e) {
+                // Skip elements that don't support getBBox or have other errors
+            }
+        });
+        
+        // Now select all collected elements
+        elementsToSelect.forEach(element => {
+            // selectElement handles both cases:
+            // - With modifier keys: toggles selection (multiSelect=true)
+            // - Without modifier keys: adds to selection (multiSelect=true, but selection was already cleared)
+            this.selectElement(element, true);
+        });
+        
+        // Update layers panel after selection
+        this.renderLayersPanel();
+    }
+    
+    selectNodesInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight) {
+        // Only select nodes from currently selected path elements
+        if (this.selectedElements.size === 0) {
+            return; // No paths selected, can't select nodes
+        }
+        
+        // Clear node selection only if not using modifier keys
+        if (!this.marqueeMultiSelect) {
+            this.clearNodeSelection();
+        }
+        
+        // Collect nodes that are within the marquee rectangle
+        const nodesToSelect = [];
+        
+        this.selectedElements.forEach(element => {
+            // Only process path elements
+            if (element.tagName !== 'path') {
+                return;
+            }
+            
+            // Get all node handles for this path
+            const pathData = element.getAttribute('d');
+            if (!pathData) return;
+            
+            const commands = this.parsePathData(pathData);
+            const elementId = element.id || '';
+            
+            commands.forEach((cmd, index) => {
+                // Check main point
+                if (cmd.type === 'M' || cmd.type === 'L' || cmd.type === 'C' || cmd.type === 'Q') {
+                    const nodePos = this.getNodePosition({ element, index, pointType: 'main' });
+                    if (nodePos) {
+                        // Check if node position is within marquee rectangle
+                        if (nodePos.x >= marqueeX && nodePos.x <= marqueeX + marqueeWidth &&
+                            nodePos.y >= marqueeY && nodePos.y <= marqueeY + marqueeHeight) {
+                            const nodeId = `${elementId}-${index}-main`;
+                            nodesToSelect.push(nodeId);
+                        }
+                    }
+                }
+                
+                // Check control points for curves
+                if (cmd.type === 'C' || cmd.type === 'Q') {
+                    // Control point 1
+                    if (cmd.x1 !== undefined && cmd.y1 !== undefined) {
+                        const nodePos = this.getNodePosition({ element, index, pointType: 'control1' });
+                        if (nodePos) {
+                            if (nodePos.x >= marqueeX && nodePos.x <= marqueeX + marqueeWidth &&
+                                nodePos.y >= marqueeY && nodePos.y <= marqueeY + marqueeHeight) {
+                                const nodeId = `${elementId}-${index}-control1`;
+                                nodesToSelect.push(nodeId);
+                            }
+                        }
+                    }
+                    
+                    // Control point 2 (for C commands)
+                    if (cmd.type === 'C' && cmd.x2 !== undefined && cmd.y2 !== undefined) {
+                        const nodePos = this.getNodePosition({ element, index, pointType: 'control2' });
+                        if (nodePos) {
+                            if (nodePos.x >= marqueeX && nodePos.x <= marqueeX + marqueeWidth &&
+                                nodePos.y >= marqueeY && nodePos.y <= marqueeY + marqueeHeight) {
+                                const nodeId = `${elementId}-${index}-control2`;
+                                nodesToSelect.push(nodeId);
+                            }
+                        }
+                    }
+                }
+            });
+        });
+        
+        // Select all collected nodes
+        nodesToSelect.forEach(nodeId => {
+            if (this.marqueeMultiSelect) {
+                // Toggle selection
+                if (this.selectedNodes.has(nodeId)) {
+                    this.selectedNodes.delete(nodeId);
+                } else {
+                    this.selectedNodes.add(nodeId);
+                }
+            } else {
+                // Add to selection
+                this.selectedNodes.add(nodeId);
+            }
+        });
+        
+        // Update node handles to reflect selection
+        this.updateNodeHandleSelection();
+    }
+    
+    updateNodeHandleSelection() {
+        // Update visual selection state of node handles
+        this.nodeHandles.forEach(handle => {
+            const commandIndex = handle.dataset.commandIndex;
+            const cornerIndex = handle.dataset.cornerIndex;
+            const pointType = handle.dataset.pointType || (cornerIndex !== undefined ? `corner${cornerIndex}` : 'main');
+            const index = commandIndex !== undefined ? commandIndex : cornerIndex;
+            const elementId = handle.dataset.elementId || '';
+            const nodeId = `${elementId}-${index}-${pointType}`;
+            
+            if (this.selectedNodes.has(nodeId)) {
+                handle.classList.add('selected');
+            } else {
+                handle.classList.remove('selected');
+            }
+        });
     }
     
     setupZoomAndPan() {
