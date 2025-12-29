@@ -1620,6 +1620,25 @@ class SVGEditor {
         // Apply transform to wrapper div
         const transform = `translate(${this.panOffset.x}px, ${this.panOffset.y}px) scale(${this.zoomLevel})`;
         this.svgWrapper.style.transform = transform;
+        
+        // Update node handles to maintain constant screen size
+        this.updateNodeHandleTransforms();
+    }
+    
+    updateNodeHandleTransforms() {
+        // Apply inverse scale to node handles so they maintain constant screen size
+        const inverseScale = 1 / this.zoomLevel;
+        this.nodeHandles.forEach(handle => {
+            if (handle) {
+                // Get the current position in SVG coordinates
+                const cx = parseFloat(handle.getAttribute('cx')) || 0;
+                const cy = parseFloat(handle.getAttribute('cy')) || 0;
+                
+                // Apply inverse scale transform centered at the handle position
+                // This keeps the handle at a constant screen size regardless of zoom
+                handle.setAttribute('transform', `translate(${cx}, ${cy}) scale(${inverseScale}) translate(${-cx}, ${-cy})`);
+            }
+        });
     }
     
     selectElement(element, multiSelect = false) {
@@ -1901,6 +1920,9 @@ class SVGEditor {
                 }
             }
         });
+        
+        // Apply inverse scale transform to maintain constant screen size
+        this.updateNodeHandleTransforms();
     }
     
     showElementHandles(element) {
@@ -1962,6 +1984,9 @@ class SVGEditor {
             this.svgElement.appendChild(handle);
             this.nodeHandles.push(handle);
         });
+        
+        // Apply inverse scale transform to maintain constant screen size
+        this.updateNodeHandleTransforms();
     }
     
     clearNodeHandles() {
