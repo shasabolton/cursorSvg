@@ -58,6 +58,7 @@ class SVGEditor {
         this.marqueeRect = null;
         this.marqueeStart = { x: 0, y: 0 };
         this.marqueeMultiSelect = false;
+        this.justCompletedMarqueeSelection = false; // Flag to prevent click handler from interfering
         
         this.init();
     }
@@ -903,6 +904,12 @@ class SVGEditor {
         });
         
         this.svgElement.addEventListener('click', (e) => {
+            // Ignore click events immediately after marquee selection completes (selection was already handled in mouseup)
+            if (this.justCompletedMarqueeSelection) {
+                this.justCompletedMarqueeSelection = false;
+                return;
+            }
+            
             const target = e.target;
             if (target && target !== this.svgElement && 
                 (target.tagName === 'path' || target.tagName === 'circle' || 
@@ -1123,6 +1130,16 @@ class SVGEditor {
     }
     
     handleMouseUp(e) {
+        // Handle marquee selection end FIRST (before other handlers that might interfere)
+        if (this.isMarqueeSelecting) {
+            this.endMarqueeSelection();
+            // Clear the flag after click event would have fired (click fires after mouseup)
+            setTimeout(() => {
+                this.justCompletedMarqueeSelection = false;
+            }, 10);
+            return; // Don't process other mouseup handlers when marquee selecting
+        }
+        
         // Handle element selection on mouseup (if it wasn't a drag)
         if (this.pendingSelectionElement && !this.wasDragging) {
             if (this.currentTool === 'select' || this.currentTool === 'direct-select') {
@@ -1172,11 +1189,6 @@ class SVGEditor {
         if (this.isTransforming) {
             this.isTransforming = false;
             this.transformHandle = null;
-        }
-        
-        // Handle marquee selection end
-        if (this.isMarqueeSelecting) {
-            this.endMarqueeSelection();
         }
     }
     
@@ -1243,7 +1255,18 @@ class SVGEditor {
     }
     
     endMarqueeSelection() {
-        if (!this.isMarqueeSelecting || !this.marqueeRect) return;
+        if (!this.isMarqueeSelecting) return;
+        
+        // Get the final marquee rectangle bounds before removing it
+        // Check if marqueeRect still exists and is in the DOM
+        if (!this.marqueeRect || !this.marqueeRect.parentNode) {
+            // Rectangle was already removed, just reset state
+            this.isMarqueeSelecting = false;
+            this.marqueeRect = null;
+            this.marqueeStart = { x: 0, y: 0 };
+            this.marqueeMultiSelect = false;
+            return;
+        }
         
         // Get the final marquee rectangle bounds (already in SVG root coordinates)
         const marqueeX = parseFloat(this.marqueeRect.getAttribute('x'));
@@ -1261,7 +1284,8 @@ class SVGEditor {
                 this.clearSelection();
             }
             
-            // Select elements that intersect with the marquee rectangle
+            // Collect elements that intersect with the marquee rectangle
+            const elementsToSelect = [];
             allElements.forEach(element => {
                 // Skip elements that are in the bounding box or marquee groups
                 if (element.closest && (element.closest('#boundingBoxGroup') || element.closest('#marqueeSelectGroup'))) {
@@ -1302,15 +1326,20 @@ class SVGEditor {
                         minX + elementWidth > marqueeX &&
                         minY < marqueeY + marqueeHeight &&
                         minY + elementHeight > marqueeY) {
-                        // Element intersects with marquee rectangle - select it
-                        // With modifier keys: toggles selection (adds if not selected, removes if selected)
-                        // Without modifier keys: adds to selection (selection was already cleared above)
-                        this.selectElement(element, true);
-                        console.log("selectedElement:",element)
+                        // Element intersects with marquee rectangle
+                        elementsToSelect.push(element);
                     }
                 } catch (e) {
                     // Skip elements that don't support getBBox or have other errors
                 }
+            });
+            
+            // Now select all collected elements
+            elementsToSelect.forEach(element => {
+                // selectElement handles both cases:
+                // - With modifier keys: toggles selection (multiSelect=true)
+                // - Without modifier keys: adds to selection (multiSelect=true, but selection was already cleared)
+                this.selectElement(element, true);
             });
             
             // Update layers panel after selection
@@ -1322,6 +1351,9 @@ class SVGEditor {
         if (marqueeGroup) {
             marqueeGroup.remove();
         }
+        
+        // Set flag to prevent click handler from interfering (must be set before resetting isMarqueeSelecting)
+        this.justCompletedMarqueeSelection = true;
         
         // Reset state
         this.isMarqueeSelecting = false;
