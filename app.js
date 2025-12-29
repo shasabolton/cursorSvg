@@ -1308,12 +1308,16 @@ class SVGEditor {
         
         // Only select if the marquee rectangle has a valid size
         if (marqueeWidth > 0 && marqueeHeight > 0) {
+            // Determine drag direction: left-to-right if end x > start x, right-to-left otherwise
+            const isLeftToRight = marqueeX >= this.marqueeStart.x;
+            
             if (this.currentTool === 'direct-select') {
                 // Direct-select mode: select nodes from currently selected paths
                 this.selectNodesInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight);
             } else {
                 // Select mode: select paths/elements
-                this.selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight);
+                // Pass drag direction: true for left-to-right (containment), false for right-to-left (intersection)
+                this.selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight, isLeftToRight);
             }
         }
         
@@ -1333,7 +1337,7 @@ class SVGEditor {
         this.marqueeMultiSelect = false;
     }
     
-    selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight) {
+    selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight, isLeftToRight = true) {
         // Get all selectable elements
         const allElements = this.svgElement.querySelectorAll('path, circle, rect, ellipse, line, polyline, polygon');
         
@@ -1342,7 +1346,7 @@ class SVGEditor {
             this.clearSelection();
         }
         
-        // Collect elements that intersect with the marquee rectangle
+        // Collect elements based on drag direction
         const elementsToSelect = [];
         allElements.forEach(element => {
             // Skip elements that are in the bounding box or marquee groups
@@ -1375,16 +1379,28 @@ class SVGEditor {
                     maxY = Math.max(maxY, corner.y);
                 });
                 
-                // Check if element's bounding box intersects with marquee rectangle
                 const elementWidth = maxX - minX;
                 const elementHeight = maxY - minY;
                 
-                // Rectangle intersection check
-                if (minX < marqueeX + marqueeWidth &&
-                    minX + elementWidth > marqueeX &&
-                    minY < marqueeY + marqueeHeight &&
-                    minY + elementHeight > marqueeY) {
-                    // Element intersects with marquee rectangle
+                let shouldSelect = false;
+                
+                if (isLeftToRight) {
+                    // Left-to-right: only select elements completely inside the marquee box
+                    // Element is completely inside if all corners are within the marquee rectangle
+                    shouldSelect = (minX >= marqueeX &&
+                                   maxX <= marqueeX + marqueeWidth &&
+                                   minY >= marqueeY &&
+                                   maxY <= marqueeY + marqueeHeight);
+                } else {
+                    // Right-to-left: select elements that intersect with the marquee box
+                    // Rectangle intersection check
+                    shouldSelect = (minX < marqueeX + marqueeWidth &&
+                                  minX + elementWidth > marqueeX &&
+                                  minY < marqueeY + marqueeHeight &&
+                                  minY + elementHeight > marqueeY);
+                }
+                
+                if (shouldSelect) {
                     elementsToSelect.push(element);
                 }
             } catch (e) {
