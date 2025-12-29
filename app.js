@@ -635,9 +635,20 @@ class SVGEditor {
             }
         }
         
-        // Clear node handles when switching tools
+        // Clear node handles when switching to select tool
         if (tool === 'select') {
             this.clearNodeHandles();
+        }
+        
+        // When switching to direct-select, show node handles for all currently selected paths
+        if (tool === 'direct-select') {
+            this.clearNodeHandles();
+            // Show node handles for all selected path elements
+            this.selectedElements.forEach(element => {
+                if (element.tagName === 'path') {
+                    this.showNodeHandles(element);
+                }
+            });
         }
         
         // Clear marquee selection when switching tools (but keep marquee mode enabled if it was)

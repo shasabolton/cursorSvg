@@ -673,11 +673,9 @@ body {
 .svg-container svg polyline.selected,
 .svg-container svg polygon.selected {
     /* Strong, high-contrast selection styling */
-    stroke: #ff4081;              /* bright accent colour */
-    stroke-width: 5;              /* clearly thicker than typical artwork strokes */
-    stroke-opacity: 1;
+    stroke: #ff0000 !important;              /* red stroke for selected paths */
+    stroke-opacity: 1 !important;
     vector-effect: non-scaling-stroke;
-    filter: drop-shadow(0 0 5px rgba(255, 64, 129, 0.8));
 }
 
 .svg-container svg path.dragging,
