@@ -1262,6 +1262,9 @@ class SVGEditor {
         this.marqueeRect.setAttribute('height', '0');
         
         marqueeGroup.appendChild(this.marqueeRect);
+        
+        // Apply inverse scale transform to maintain constant screen size
+        this.updateTemporaryUIElementTransforms();
     }
     
     updateMarqueeSelection(e) {
@@ -1284,6 +1287,9 @@ class SVGEditor {
         this.marqueeRect.setAttribute('y', y);
         this.marqueeRect.setAttribute('width', width);
         this.marqueeRect.setAttribute('height', height);
+        
+        // Update transform to maintain constant screen size
+        this.updateTemporaryUIElementTransforms();
     }
     
     endMarqueeSelection() {
@@ -1621,8 +1627,8 @@ class SVGEditor {
         const transform = `translate(${this.panOffset.x}px, ${this.panOffset.y}px) scale(${this.zoomLevel})`;
         this.svgWrapper.style.transform = transform;
         
-        // Update node handles to maintain constant screen size
-        this.updateNodeHandleTransforms();
+        // Update all temporary UI elements to maintain constant screen size
+        this.updateTemporaryUIElementTransforms();
     }
     
     updateNodeHandleTransforms() {
@@ -1639,6 +1645,71 @@ class SVGEditor {
                 handle.setAttribute('transform', `translate(${cx}, ${cy}) scale(${inverseScale}) translate(${-cx}, ${-cy})`);
             }
         });
+    }
+    
+    updateTemporaryUIElementTransforms() {
+        // Apply inverse scale to stroke-width and handles so they maintain constant screen size
+        const inverseScale = 1 / this.zoomLevel;
+        
+        // Update node handles
+        this.updateNodeHandleTransforms();
+        
+        // Update bounding box stroke-width and handles (but not the group transform)
+        if (this.boundingBoxOverlay) {
+            // Remove any group transform
+            this.boundingBoxOverlay.removeAttribute('transform');
+            
+            // Update stroke-width of bounding box rectangle
+            const bboxRect = this.boundingBoxOverlay.querySelector('.bounding-box');
+            if (bboxRect) {
+                const baseStrokeWidth = 2;
+                bboxRect.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
+                // Also scale the dash array
+                const baseDashArray = '5,5';
+                const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
+                bboxRect.setAttribute('stroke-dasharray', dashValues.join(','));
+            }
+            
+            // Update bounding box handles (resize handles and rotation handle)
+            const handles = this.boundingBoxOverlay.querySelectorAll('.bbox-handle, .bbox-rotation-handle');
+            handles.forEach(handle => {
+                const cx = parseFloat(handle.getAttribute('cx')) || 0;
+                const cy = parseFloat(handle.getAttribute('cy')) || 0;
+                // Keep radius at base value (transform will scale it)
+                const baseR = 6;
+                const baseStrokeWidth = 2;
+                handle.setAttribute('r', baseR);
+                handle.setAttribute('stroke-width', baseStrokeWidth);
+                // Apply transform to keep handle at constant screen size
+                handle.setAttribute('transform', `translate(${cx}, ${cy}) scale(${inverseScale}) translate(${-cx}, ${-cy})`);
+            });
+            
+            // Update rotation line stroke-width
+            const rotationLine = this.boundingBoxOverlay.querySelector('line');
+            if (rotationLine) {
+                const baseStrokeWidth = 1;
+                rotationLine.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
+                // Also scale the dash array
+                const baseDashArray = '3,3';
+                const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
+                rotationLine.setAttribute('stroke-dasharray', dashValues.join(','));
+            }
+        }
+        
+        // Update marquee selection stroke-width (but not the group transform)
+        const marqueeGroup = this.svgElement ? this.svgElement.querySelector('#marqueeSelectGroup') : null;
+        if (marqueeGroup && this.marqueeRect) {
+            // Remove any group transform
+            marqueeGroup.removeAttribute('transform');
+            
+            // Update stroke-width of marquee rectangle
+            const baseStrokeWidth = 1;
+            this.marqueeRect.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
+            // Also scale the dash array
+            const baseDashArray = '4,4';
+            const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
+            this.marqueeRect.setAttribute('stroke-dasharray', dashValues.join(','));
+        }
     }
     
     selectElement(element, multiSelect = false) {
@@ -3883,6 +3954,9 @@ class SVGEditor {
         line.setAttribute('stroke-width', '1');
         line.setAttribute('stroke-dasharray', '3,3');
         this.boundingBoxOverlay.appendChild(line);
+        
+        // Apply inverse scale transform to maintain constant screen size
+        this.updateTemporaryUIElementTransforms();
     }
     
     handleBoundingBoxHandleDown(e, handleType) {
