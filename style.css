@@ -666,7 +666,7 @@ body {
 }
 
 .svg-container svg path.selected,
-.svg-container svg circle.selected,
+.svg-container svg circle.selected:not(.node-handle),
 .svg-container svg rect.selected,
 .svg-container svg ellipse.selected,
 .svg-container svg line.selected,
@@ -705,6 +705,9 @@ body {
 
 .node-handle.selected {
     fill: #ff5722;
+    stroke: none;
+    stroke-width: 0;
+    filter: none;
 }
 
 .bounding-box-group {
