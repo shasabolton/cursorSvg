@@ -53,7 +53,6 @@ class PathTool {
     point180(origin, point) {
         point.x = origin.x - (point.x-origin.x);
         point.y = origin.y - (point.y-origin.y);
-        return point;
     }
 
     onMouseMove(e) {
@@ -66,7 +65,7 @@ class PathTool {
         point.x = e.clientX;
         point.y = e.clientY;
         const svgPoint = point.matrixTransform(this.editor.svgElement.getScreenCTM().inverse());
-        svgPoint = this.point180(this.pendingPoint, svgPoint);
+        this.point180(this.pendingPoint, svgPoint);
         // Check if we're dragging (moved more than threshold)
         const moveThreshold = 3;
         const movedX = Math.abs(svgPoint.x - this.dragStart.x);
