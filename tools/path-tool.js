@@ -18,6 +18,8 @@ class PathTool {
         this.previewElement = null;
         this.lastPoint = null;
         this.pendingPoint = null;
+        this.lastControlPoint = null; // Track the last control point from previous curve segment
+        this.lastSegmentWasCurve = false; // Track if the last segment was a curve
     }
 
     onMouseDown(e, element) {
@@ -166,48 +168,84 @@ class PathTool {
         
         this.points.push(point);
         this.lastPoint = point;
+        this.lastSegmentWasCurve = false;
+        this.lastControlPoint = null; // No control point for straight line
         this.updatePreview();
     }
 
-    addPointForCurve(endPoint, controlPoint) {
-        // Add a point that will be part of a curve
-        // The curve goes from lastPoint -> controlPoint -> endPoint
+    addPointForCurve(endPoint, controlPoint2) {
+        // Add a cubic Bezier curve: C x1 y1 x2 y2 x y
+        // x1, y1: first control point (mirrored from previous segment's last control point)
+        // x2, y2: second control point (controlPoint2 - the mirrored control point from current drag)
+        // x, y: endpoint
+        
+        let controlPoint1;
+        
+        if (this.lastSegmentWasCurve && this.lastControlPoint) {
+            // Previous segment was a curve - mirror its last control point across the last point
+            controlPoint1 = this.point180(this.lastPoint, this.lastControlPoint);
+        } else {
+            // Previous segment was a straight line - use the last point as first control point
+            controlPoint1 = { x: this.lastPoint.x, y: this.lastPoint.y };
+        }
+        
         this.points.push(endPoint);
         this.lastPoint = endPoint;
         
-        // Add quadratic curve: Q controlX controlY endX endY
-        this.pathData += ` Q ${controlPoint.x} ${controlPoint.y} ${endPoint.x} ${endPoint.y}`;
+        // Add cubic Bezier curve: C x1 y1 x2 y2 x y
+        this.pathData += ` C ${controlPoint1.x} ${controlPoint1.y} ${controlPoint2.x} ${controlPoint2.y} ${endPoint.x} ${endPoint.y}`;
         
-        this.currentControlPoint = controlPoint;
+        this.currentControlPoint = controlPoint2;
+        this.lastControlPoint = controlPoint2; // Store for next segment
+        this.lastSegmentWasCurve = true;
     }
 
-    updateLastSegmentToCurve(controlPoint) {
-        // Update the last Q command with a new control point
+    updateLastSegmentToCurve(controlPoint2) {
+        // Update the last C command with a new second control point
+        // The first control point stays the same (extract from existing C command)
         // The end point is the last point in the points array
         if (this.points.length > 0) {
             const endPoint = this.points[this.points.length - 1];
             
-            // Replace the last Q command with updated control point
+            // Extract first control point from existing C command (it should already be there)
+            let controlPoint1;
+            const lastCRegex = /\s+C\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)$/;
+            const match = this.pathData.match(lastCRegex);
+            if (match) {
+                // Use existing first control point from the C command
+                controlPoint1 = { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+            } else {
+                // Fallback: calculate first control point (shouldn't happen, but be safe)
+                if (this.points.length >= 2) {
+                    const prevPoint = this.points[this.points.length - 2];
+                    if (this.lastSegmentWasCurve && this.lastControlPoint) {
+                        controlPoint1 = this.point180(prevPoint, this.lastControlPoint);
+                    } else {
+                        controlPoint1 = { x: prevPoint.x, y: prevPoint.y };
+                    }
+                } else {
+                    controlPoint1 = { x: this.points[0].x, y: this.points[0].y };
+                }
+            }
+            
+            // Replace the last C command with updated second control point
             this.pathData = this.pathData.replace(
-                /\s+Q\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/,
-                ` Q ${controlPoint.x} ${controlPoint.y} ${endPoint.x} ${endPoint.y}`
+                /\s+C\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/,
+                ` C ${controlPoint1.x} ${controlPoint1.y} ${controlPoint2.x} ${controlPoint2.y} ${endPoint.x} ${endPoint.y}`
             );
             
-            this.currentControlPoint = controlPoint;
+            this.currentControlPoint = controlPoint2;
+            this.lastControlPoint = controlPoint2; // Update for preview
         }
     }
 
     finalizeCurveSegment() {
         // Finalize the curve segment with the fixed control point
-        // The curve is already in the path data, just need to update it with final control point
-        if (this.currentControlPoint && this.points.length > 0) {
-            const endPoint = this.points[this.points.length - 1];
-            
-            // Update the last Q command with the final control point
-            this.pathData = this.pathData.replace(
-                /\s+Q\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/,
-                ` Q ${this.currentControlPoint.x} ${this.currentControlPoint.y} ${endPoint.x} ${endPoint.y}`
-            );
+        // The curve is already in the path data, just need to ensure it's correct
+        // This is mainly handled by updateLastSegmentToCurve, but we ensure lastControlPoint is set
+        if (this.currentControlPoint) {
+            this.lastControlPoint = this.currentControlPoint;
+            this.lastSegmentWasCurve = true;
         }
         this.updatePreview();
     }
@@ -220,15 +258,35 @@ class PathTool {
         let previewPath = this.pathData;
         
         // If dragging, show preview of current curve
-        if (this.isDragging && this.currentControlPoint && this.points.length >= 2) {
-            const prevPoint = this.points[this.points.length - 2];
+        if (this.isDragging && this.currentControlPoint && this.points.length >= 1) {
             const endPoint = this.points[this.points.length - 1];
             
-            // Remove any existing Q command for this segment
-            previewPath = previewPath.replace(/\s+Q\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/, '');
+            // Extract first control point from existing C command (should already be in pathData)
+            let controlPoint1;
+            const lastCRegex = /\s+C\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)$/;
+            const match = previewPath.match(lastCRegex);
+            if (match) {
+                // Use existing first control point from the C command
+                controlPoint1 = { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+            } else {
+                // Fallback: calculate first control point (shouldn't happen normally)
+                if (this.points.length >= 2) {
+                    const prevPoint = this.points[this.points.length - 2];
+                    if (this.lastSegmentWasCurve && this.lastControlPoint) {
+                        controlPoint1 = this.point180(prevPoint, this.lastControlPoint);
+                    } else {
+                        controlPoint1 = { x: prevPoint.x, y: prevPoint.y };
+                    }
+                } else {
+                    controlPoint1 = { x: this.points[0].x, y: this.points[0].y };
+                }
+            }
             
-            // Add preview curve with current control point
-            previewPath += ` Q ${this.currentControlPoint.x} ${this.currentControlPoint.y} ${endPoint.x} ${endPoint.y}`;
+            // Remove any existing C command for this segment
+            previewPath = previewPath.replace(/\s+C\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/, '');
+            
+            // Add preview cubic curve with current control points
+            previewPath += ` C ${controlPoint1.x} ${controlPoint1.y} ${this.currentControlPoint.x} ${this.currentControlPoint.y} ${endPoint.x} ${endPoint.y}`;
         } else if (currentPoint && !this.isDragging) {
             // Show preview line to current point
             previewPath += ` L ${currentPoint.x} ${currentPoint.y}`;
@@ -318,6 +376,8 @@ class PathTool {
         this.isDragging = false;
         this.currentControlPoint = null;
         this.pendingPoint = null;
+        this.lastControlPoint = null;
+        this.lastSegmentWasCurve = false;
     }
 }
 
