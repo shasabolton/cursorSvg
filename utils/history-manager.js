@@ -8,6 +8,22 @@ class HistoryManager {
     }
     
     /**
+     * Remove a class from an SVG element, handling both string and SVGAnimatedString className
+     */
+    removeClassFromElement(element, classNameToRemove) {
+        const currentClass = (element.className && element.className.baseVal) ? element.className.baseVal : 
+                            (typeof element.className === 'string' ? element.className : '');
+        if (currentClass) {
+            const classList = currentClass.split(/\s+/).filter(c => c && c !== classNameToRemove);
+            if (classList.length > 0) {
+                element.setAttribute('class', classList.join(' '));
+            } else {
+                element.removeAttribute('class');
+            }
+        }
+    }
+    
+    /**
      * Save the current SVG state to history
      * @param {string} description - Optional description of the change
      */
@@ -20,8 +36,32 @@ class HistoryManager {
             return;
         }
         
-        // Serialize the current SVG state
+        // Clone the SVG and clean up temporary elements and classes
         const svgClone = this.editor.svgElement.cloneNode(true);
+        
+        // Remove bounding box overlay group
+        const boundingBoxGroup = svgClone.querySelector('#boundingBoxGroup');
+        if (boundingBoxGroup) {
+            boundingBoxGroup.remove();
+        }
+        
+        // Remove all node handles (elements with class "node-handle")
+        const nodeHandles = svgClone.querySelectorAll('.node-handle');
+        nodeHandles.forEach(handle => handle.remove());
+        
+        // Remove "selected" class from all elements (temporary visual styling)
+        const selectedElements = svgClone.querySelectorAll('.selected');
+        selectedElements.forEach(el => {
+            this.removeClassFromElement(el, 'selected');
+        });
+        
+        // Remove "dragging" class from all elements
+        const draggingElements = svgClone.querySelectorAll('.dragging');
+        draggingElements.forEach(el => {
+            this.removeClassFromElement(el, 'dragging');
+        });
+        
+        // Serialize the cleaned SVG
         const serializer = new XMLSerializer();
         const svgString = serializer.serializeToString(svgClone);
         

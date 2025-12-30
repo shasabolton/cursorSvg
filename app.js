@@ -640,13 +640,13 @@ class SVGEditor {
             }
             
             // Ctrl+Z for Undo
-            if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+            if (e.ctrlKey && e.key.toLowerCase() === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 this.historyManager.undo();
             }
             
             // Shift+Ctrl+Z for Redo
-            if (e.ctrlKey && e.shiftKey && e.key === 'z') {
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') {
                 e.preventDefault();
                 this.historyManager.redo();
             }
