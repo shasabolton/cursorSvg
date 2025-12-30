@@ -51,8 +51,11 @@ class PathTool {
     }
     
     point180(origin, point) {
-        point.x = origin.x - (point.x-origin.x);
-        point.y = origin.y - (point.y-origin.y);
+        // Mirror point across origin: P' = 2*O - P
+        return {
+            x: 2 * origin.x - point.x,
+            y: 2 * origin.y - point.y
+        };
     }
 
     onMouseMove(e) {
@@ -65,7 +68,7 @@ class PathTool {
         point.x = e.clientX;
         point.y = e.clientY;
         const svgPoint = point.matrixTransform(this.editor.svgElement.getScreenCTM().inverse());
-        this.point180(this.pendingPoint, svgPoint);
+        
         // Check if we're dragging (moved more than threshold)
         const moveThreshold = 3;
         const movedX = Math.abs(svgPoint.x - this.dragStart.x);
@@ -76,16 +79,22 @@ class PathTool {
             // Just started dragging - add point at drag start and create curve with control point
             this.isDragging = true;
             if (this.pendingPoint) {
-                // Add the point at mouse down location and create curve with current control point
-                this.addPointForCurve(this.pendingPoint, svgPoint);
+                // Mirror the mouse position across the anchor point to get the control point
+                const mirroredControlPoint = this.point180(this.pendingPoint, svgPoint);
+                // Add the point at mouse down location and create curve with mirrored control point
+                this.addPointForCurve(this.pendingPoint, mirroredControlPoint);
                 this.pendingPoint = null;
             }
         }
 
         if (this.isDragging) {
-            // Update control point while dragging
-            this.updateLastSegmentToCurve(svgPoint);
-            this.updatePreview(svgPoint);
+            // Update control point while dragging - mirror mouse position across anchor point
+            if (this.points.length > 0) {
+                const anchorPoint = this.points[this.points.length - 1];
+                const mirroredControlPoint = this.point180(anchorPoint, svgPoint);
+                this.updateLastSegmentToCurve(mirroredControlPoint);
+                this.updatePreview(svgPoint);
+            }
         } else {
             // Not dragging yet - show preview line to pending point or current position
             const previewPoint = this.pendingPoint || svgPoint;
@@ -107,9 +116,13 @@ class PathTool {
         const svgPoint = point.matrixTransform(this.editor.svgElement.getScreenCTM().inverse());
 
         if (this.isDragging) {
-            // Finished dragging - fix the control point at current mouse position
-            this.currentControlPoint = svgPoint;
-            this.finalizeCurveSegment();
+            // Finished dragging - fix the control point (mirrored across anchor point)
+            if (this.points.length > 0) {
+                const anchorPoint = this.points[this.points.length - 1];
+                const mirroredControlPoint = this.point180(anchorPoint, svgPoint);
+                this.currentControlPoint = mirroredControlPoint;
+                this.finalizeCurveSegment();
+            }
         } else {
             // It was a click (not a drag) - add straight line point
             if (this.pendingPoint) {
