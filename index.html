@@ -113,6 +113,21 @@
                     </svg>
                     <span class="tool-tooltip">Marquee Select</span>
                 </button>
+                <button id="penTool" class="tool-palette-btn" data-tool="pen" title="Pen Tool">
+                    <svg class="tool-icon" viewBox="0 0 24 24" width="24" height="24">
+                        <!-- Pen/Bezier tool icon -->
+                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" fill="currentColor"/>
+                    </svg>
+                    <span class="tool-tooltip">Pen Tool</span>
+                </button>
+                <button id="pathTool" class="tool-palette-btn" data-tool="path" title="Path Tool">
+                    <svg class="tool-icon" viewBox="0 0 24 24" width="24" height="24">
+                        <!-- Path tool icon - curved path -->
+                        <path d="M3 12c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm8 0c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2zm8 0c0-1.1.9-2 2-2s2 .9 2 2-.9 2-2 2-2-.9-2-2z" fill="currentColor"/>
+                        <path d="M3 12c2-3 5-4 8-4s6 1 8 4M3 12c2 3 5 4 8 4s6-1 8-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                    </svg>
+                    <span class="tool-tooltip">Path Tool</span>
+                </button>
             </aside>
             
             <main class="canvas-container">
@@ -206,6 +221,8 @@
     <script src="tools/select-tool.js"></script>
     <script src="tools/direct-select-tool.js"></script>
     <script src="tools/marquee-tool.js"></script>
+    <script src="tools/pen-tool.js"></script>
+    <script src="tools/path-tool.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

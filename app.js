@@ -12,6 +12,8 @@ class SVGEditor {
         this.selectTool = new SelectTool(this);
         this.directSelectTool = new DirectSelectTool(this);
         this.marqueeTool = new MarqueeTool(this);
+        this.penTool = new PenTool(this);
+        this.pathTool = new PathTool(this);
         // Keep selectedElements as a getter for backward compatibility
         Object.defineProperty(this, 'selectedElements', {
             get: function() { return this.selectionManager.selectedElements; }
@@ -153,6 +155,14 @@ class SVGEditor {
         
         document.getElementById('marqueeSelectTool').addEventListener('click', () => {
             this.marqueeTool.toggleMode();
+        });
+        
+        document.getElementById('penTool').addEventListener('click', () => {
+            this.setTool('pen');
+        });
+        
+        document.getElementById('pathTool').addEventListener('click', () => {
+            this.setTool('path');
         });
         
         // Setup tooltips
@@ -784,6 +794,16 @@ class SVGEditor {
         if (this.marqueeTool.isMarqueeSelecting) {
             this.marqueeTool.endSelection();
         }
+        
+        // Cancel pen tool drawing when switching tools
+        if (this.penTool.isDrawing) {
+            this.penTool.cancelDrawing();
+        }
+        
+        // Cancel path tool drawing when switching tools
+        if (this.pathTool.isDrawing) {
+            this.pathTool.cancelDrawing();
+        }
     }
     
     toggleMarqueeMode() {
@@ -882,6 +902,11 @@ class SVGEditor {
                 return;
             }
             
+            // Ignore node handles - they have their own handlers
+            if (target && target.classList.contains('node-handle')) {
+                return;
+            }
+            
             // Ignore marquee selection rectangle
             if (target && (target.closest && target.closest('#marqueeSelectGroup'))) {
                 return;
@@ -899,6 +924,40 @@ class SVGEditor {
                 // Clicked on canvas - start marquee selection
                 e.stopPropagation();
                 this.marqueeTool.startSelection(e);
+                return;
+            }
+            
+            // Handle pen tool clicks on canvas (need to allow clicks even on empty canvas)
+            if (this.currentTool === 'pen') {
+                e.stopPropagation();
+                // Check if clicking on a drawable element - if so, don't start drawing
+                const isDrawableElement = target && target !== this.svgElement && 
+                    (target.tagName === 'path' || target.tagName === 'circle' || 
+                     target.tagName === 'rect' || target.tagName === 'ellipse' || 
+                     target.tagName === 'line' || target.tagName === 'polyline' || 
+                     target.tagName === 'polygon');
+                
+                // Only handle if clicking on empty canvas (not on a drawable element)
+                if (!isDrawableElement) {
+                    this.handleMouseDown(e, this.svgElement);
+                }
+                return;
+            }
+            
+            // Handle path tool clicks on canvas (need to allow clicks even on empty canvas)
+            if (this.currentTool === 'path') {
+                e.stopPropagation();
+                // Check if clicking on a drawable element - if so, don't start drawing
+                const isDrawableElement = target && target !== this.svgElement && 
+                    (target.tagName === 'path' || target.tagName === 'circle' || 
+                     target.tagName === 'rect' || target.tagName === 'ellipse' || 
+                     target.tagName === 'line' || target.tagName === 'polyline' || 
+                     target.tagName === 'polygon');
+                
+                // Only handle if clicking on empty canvas (not on a drawable element)
+                if (!isDrawableElement) {
+                    this.handleMouseDown(e, this.svgElement);
+                }
                 return;
             }
             
@@ -985,6 +1044,21 @@ class SVGEditor {
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         document.addEventListener('mouseup', (e) => this.handleMouseUp(e));
         
+        // Add double-click handler for pen tool and path tool
+        this.svgElement.addEventListener('dblclick', (e) => {
+            if (this.currentTool === 'pen') {
+                if (this.penTool.onDoubleClick(e)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            } else if (this.currentTool === 'path') {
+                if (this.pathTool.onDoubleClick(e)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        });
+        
         // Add zoom and pan event handlers
         this.setupZoomAndPan();
     }
@@ -1010,6 +1084,14 @@ class SVGEditor {
             // Direct select doesn't drag elements, only nodes
             // Node dragging is handled in node-selection.js
             if (this.directSelectTool.onMouseDown(e, element)) {
+                return; // Tool handled the event
+            }
+        } else if (this.currentTool === 'pen') {
+            if (this.penTool.onMouseDown(e, element)) {
+                return; // Tool handled the event
+            }
+        } else if (this.currentTool === 'path') {
+            if (this.pathTool.onMouseDown(e, element)) {
                 return; // Tool handled the event
             }
         }
@@ -1049,6 +1131,14 @@ class SVGEditor {
             if (this.directSelectTool.onMouseMove(e)) {
                 return; // Tool handled the event
             }
+        } else if (this.currentTool === 'pen') {
+            if (this.penTool.onMouseMove(e)) {
+                return; // Tool handled the event
+            }
+        } else if (this.currentTool === 'path') {
+            if (this.pathTool.onMouseMove(e)) {
+                return; // Tool handled the event
+            }
         }
     }
     
@@ -1061,6 +1151,20 @@ class SVGEditor {
                 this.marqueeTool.justCompletedMarqueeSelection = false;
             }, 10);
             return; // Don't process other mouseup handlers when marquee selecting
+        }
+        
+        // Handle pen tool first
+        if (this.currentTool === 'pen') {
+            if (this.penTool.onMouseUp(e)) {
+                return; // Tool handled the event
+            }
+        }
+        
+        // Handle path tool
+        if (this.currentTool === 'path') {
+            if (this.pathTool.onMouseUp(e)) {
+                return; // Tool handled the event
+            }
         }
         
         // Handle element selection on mouseup (if it wasn't a drag)
