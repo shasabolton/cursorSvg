@@ -124,6 +124,25 @@
             </main>
             
             <aside class="toolbar-panel">
+                <div class="toolbar-button" id="historyToolButton" title="History">
+                    <svg class="toolbar-icon" viewBox="0 0 24 24" width="20" height="20">
+                        <path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z" fill="currentColor"/>
+                        <path d="M12 8v5l4.28 2.54.72-1.21-3.5-2.08V8H12z" fill="currentColor"/>
+                    </svg>
+                </div>
+                
+                <div class="tool-panel" id="historyPanel">
+                    <div class="tool-panel-header">
+                        <span class="tool-panel-title">History</span>
+                        <button class="tool-panel-close" id="historyPanelClose" title="Close">×</button>
+                    </div>
+                    <div class="tool-panel-content">
+                        <div id="historyList" class="history-list">
+                            <p class="empty-message">No history yet</p>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="toolbar-button" id="transformToolButton" title="Transform">
                     <svg class="toolbar-icon" viewBox="0 0 24 24" width="20" height="20">
                         <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/>
@@ -182,6 +201,7 @@
     <script src="selection/element-selection.js"></script>
     <script src="selection/node-selection.js"></script>
     <script src="transforms/bounding-box.js"></script>
+    <script src="utils/history-manager.js"></script>
     <script src="tools/select-tool.js"></script>
     <script src="tools/direct-select-tool.js"></script>
     <script src="tools/marquee-tool.js"></script>

@@ -374,6 +374,62 @@ body {
     gap: 10px;
 }
 
+#historyPanel .tool-panel-content {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.history-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    gap: 2px;
+    padding: 12px;
+}
+
+.history-item {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: background 0.2s, border-color 0.2s;
+    font-size: 12px;
+    color: #cccccc;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.history-item:hover {
+    background: #2a2d2e;
+    border-color: #404040;
+}
+
+.history-item.active {
+    background: #094771;
+    border-color: #0e639c;
+    color: #ffffff;
+}
+
+.history-item-description {
+    font-weight: 500;
+}
+
+.history-item-time {
+    font-size: 10px;
+    color: #888;
+    opacity: 0.8;
+}
+
+.history-item.active .history-item-time {
+    color: #cccccc;
+}
+
 .transform-group {
     display: flex;
     align-items: center;

@@ -5,6 +5,7 @@ class SVGEditor {
         this.selectionManager = new ElementSelectionManager(this);
         this.nodeSelectionManager = new NodeSelectionManager(this);
         this.boundingBoxManager = new BoundingBoxManager(this);
+        this.historyManager = new HistoryManager(this);
         
         // Initialize tools
         this.selectTool = new SelectTool(this);
@@ -160,6 +161,9 @@ class SVGEditor {
         
         // Setup transform panel
         this.setupTransformPanel();
+        
+        // Setup history panel
+        this.setupHistoryPanel();
         
         // Setup settings dialog
         this.setupSettingsDialog();
@@ -408,6 +412,19 @@ class SVGEditor {
     }
     
     applyFillColor(color) {
+        // Check if this will actually change anything before saving
+        let willChange = false;
+        for (const element of this.selectedElements) {
+            const currentFill = element.getAttribute('fill') || '';
+            const targetFill = (color === '#000000' || color === '#000') ? 'none' : color;
+            if (currentFill !== targetFill) {
+                willChange = true;
+                break;
+            }
+        }
+        
+        if (!willChange) return;
+        
         this.selectedElements.forEach(element => {
             // Remove fill from style attribute if it exists
             const style = element.getAttribute('style');
@@ -430,9 +447,25 @@ class SVGEditor {
                 element.setAttribute('fill', color);
             }
         });
+        
+        // Save state after applying changes
+        this.historyManager.saveState('Change fill color');
     }
     
     applyStrokeColor(color) {
+        // Check if this will actually change anything before saving
+        let willChange = false;
+        for (const element of this.selectedElements) {
+            const currentStroke = element.getAttribute('stroke') || '';
+            const targetStroke = (color === '#000000' || color === '#000') ? 'none' : color;
+            if (currentStroke !== targetStroke) {
+                willChange = true;
+                break;
+            }
+        }
+        
+        if (!willChange) return;
+        
         this.selectedElements.forEach(element => {
             // Remove stroke from style attribute if it exists
             const style = element.getAttribute('style');
@@ -455,9 +488,24 @@ class SVGEditor {
                 element.setAttribute('stroke', color);
             }
         });
+        
+        // Save state after applying changes
+        this.historyManager.saveState('Change stroke color');
     }
     
     applyStrokeWidth(width) {
+        // Check if this will actually change anything before saving
+        let willChange = false;
+        for (const element of this.selectedElements) {
+            const currentWidth = parseFloat(element.getAttribute('stroke-width')) || 1;
+            if (Math.abs(currentWidth - width) > 0.001) {
+                willChange = true;
+                break;
+            }
+        }
+        
+        if (!willChange) return;
+        
         this.selectedElements.forEach(element => {
             // Remove stroke-width from style attribute if it exists
             const style = element.getAttribute('style');
@@ -478,9 +526,24 @@ class SVGEditor {
             element.setAttribute('stroke-width', width);
         });
         console.log(width);
+        
+        // Save state after applying changes
+        this.historyManager.saveState('Change stroke width');
     }
     
     applyOpacity(opacity) {
+        // Check if this will actually change anything before saving
+        let willChange = false;
+        for (const element of this.selectedElements) {
+            const currentOpacity = parseFloat(element.getAttribute('opacity')) || 1;
+            if (Math.abs(currentOpacity - opacity) > 0.001) {
+                willChange = true;
+                break;
+            }
+        }
+        
+        if (!willChange) return;
+        
         this.selectedElements.forEach(element => {
             // Remove opacity from style attribute if it exists
             const style = element.getAttribute('style');
@@ -499,6 +562,9 @@ class SVGEditor {
             // Set opacity as an attribute (this will replace any existing one)
             element.setAttribute('opacity', opacity);
         });
+        
+        // Save state after applying changes
+        this.historyManager.saveState('Change opacity');
     }
     
     setupMenus() {
@@ -571,6 +637,18 @@ class SVGEditor {
             if (e.ctrlKey && e.key === 's') {
                 e.preventDefault();
                 this.saveSVG();
+            }
+            
+            // Ctrl+Z for Undo
+            if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                this.historyManager.undo();
+            }
+            
+            // Shift+Ctrl+Z for Redo
+            if (e.ctrlKey && e.shiftKey && e.key === 'z') {
+                e.preventDefault();
+                this.historyManager.redo();
             }
         });
     }
@@ -750,6 +828,9 @@ class SVGEditor {
             oldBBoxGroup.remove();
         }
         this.boundingBoxManager.create();
+        
+        // Initialize history with the loaded SVG
+        this.historyManager.initialize();
     }
     
     extractLayers() {
@@ -1109,19 +1190,36 @@ class SVGEditor {
         this.pendingSelectionNodeMultiSelect = false;
         
         if (this.isDragging) {
+            // Save the wasDragging flag before clearing it
+            const didDrag = this.wasDragging;
+            
             this.isDragging = false;
             if (this.currentDraggedElement) {
                 this.currentDraggedElement.classList.remove('dragging');
                 this.currentDraggedElement = null;
             }
+            
+            // Determine what was dragged for appropriate history message
+            const wasNodeDrag = this.currentDraggedNode !== null;
+            
             this.currentDraggedNode = null;
             this.selectedNodesInitialPositions.clear();
             this.selectedElementsInitialTransforms.clear();
             this.wasDragging = false;
+            
             // Update layers panel after drag completes
             this.renderLayersPanel();
             // Update bounding box after drag completes
             this.updateBoundingBox();
+            
+            // Save history state when drag operation completes
+            if (didDrag) {
+                if (wasNodeDrag) {
+                    this.historyManager.saveState('Move path nodes');
+                } else {
+                    this.historyManager.saveState('Move elements');
+                }
+            }
         }
         
         // Handle pan end
@@ -1133,6 +1231,8 @@ class SVGEditor {
         // Handle transform end
         if (this.boundingBoxManager.isTransforming) {
             this.boundingBoxManager.endTransform();
+            // Save history state after transform operation completes
+            this.historyManager.saveState('Transform elements');
         }
     }
     
@@ -2397,6 +2497,90 @@ class SVGEditor {
                 });
             }
         });
+    }
+    
+    setupHistoryPanel() {
+        const historyButton = document.getElementById('historyToolButton');
+        const historyPanel = document.getElementById('historyPanel');
+        const historyPanelClose = document.getElementById('historyPanelClose');
+        
+        // Set up updateUI callback for history manager
+        this.historyManager.updateUI = () => {
+            this.updateHistoryPanel();
+        };
+        
+        // Toggle history panel when button is clicked
+        historyButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isActive = historyPanel.classList.contains('active');
+            if (isActive) {
+                historyPanel.classList.remove('active');
+                historyButton.classList.remove('active');
+            } else {
+                historyPanel.classList.add('active');
+                historyButton.classList.add('active');
+                // Update the panel
+                this.updateHistoryPanel();
+            }
+        });
+        
+        // Close panel when close button is clicked
+        historyPanelClose.addEventListener('click', (e) => {
+            e.stopPropagation();
+            historyPanel.classList.remove('active');
+            historyButton.classList.remove('active');
+        });
+        
+        // Close panel when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.toolbar-panel')) {
+                historyPanel.classList.remove('active');
+                historyButton.classList.remove('active');
+            }
+        });
+    }
+    
+    updateHistoryPanel() {
+        const historyList = document.getElementById('historyList');
+        if (!historyList) return;
+        
+        const history = this.historyManager.getHistory();
+        const currentIndex = this.historyManager.getCurrentIndex();
+        
+        if (history.length === 0) {
+            historyList.innerHTML = '<p class="empty-message">No history yet</p>';
+            return;
+        }
+        
+        historyList.innerHTML = '';
+        
+        // Display history in reverse order (newest first)
+        for (let i = history.length - 1; i >= 0; i--) {
+            const entry = history[i];
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            if (i === currentIndex) {
+                item.classList.add('active');
+            }
+            
+            const description = document.createElement('div');
+            description.className = 'history-item-description';
+            description.textContent = entry.description;
+            
+            const time = document.createElement('div');
+            time.className = 'history-item-time';
+            time.textContent = new Date(entry.timestamp).toLocaleTimeString();
+            
+            item.appendChild(description);
+            item.appendChild(time);
+            
+            // Click to restore to this state
+            item.addEventListener('click', () => {
+                this.historyManager.restoreToIndex(i);
+            });
+            
+            historyList.appendChild(item);
+        }
     }
     
     setupTransformPanel() {
