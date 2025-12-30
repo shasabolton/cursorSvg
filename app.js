@@ -8,6 +8,8 @@ class SVGEditor {
         
         // Initialize tools
         this.selectTool = new SelectTool(this);
+        this.directSelectTool = new DirectSelectTool(this);
+        this.marqueeTool = new MarqueeTool(this);
         // Keep selectedElements as a getter for backward compatibility
         Object.defineProperty(this, 'selectedElements', {
             get: function() { return this.selectionManager.selectedElements; }
@@ -75,13 +77,32 @@ class SVGEditor {
         });
         this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
-        // Marquee selection state
-        this.marqueeModeEnabled = false; // Toggle for marquee mode (works with select/direct-select)
-        this.isMarqueeSelecting = false;
-        this.marqueeRect = null;
-        this.marqueeStart = { x: 0, y: 0 };
-        this.marqueeMultiSelect = false;
-        this.justCompletedMarqueeSelection = false; // Flag to prevent click handler from interfering
+        // Marquee selection state (moved to marqueeTool)
+        // Keep as getters for backward compatibility
+        Object.defineProperty(this, 'marqueeModeEnabled', {
+            get: function() { return this.marqueeTool.marqueeModeEnabled; },
+            set: function(value) { this.marqueeTool.marqueeModeEnabled = value; }
+        });
+        Object.defineProperty(this, 'isMarqueeSelecting', {
+            get: function() { return this.marqueeTool.isMarqueeSelecting; },
+            set: function(value) { this.marqueeTool.isMarqueeSelecting = value; }
+        });
+        Object.defineProperty(this, 'marqueeRect', {
+            get: function() { return this.marqueeTool.marqueeRect; },
+            set: function(value) { this.marqueeTool.marqueeRect = value; }
+        });
+        Object.defineProperty(this, 'marqueeStart', {
+            get: function() { return this.marqueeTool.marqueeStart; },
+            set: function(value) { this.marqueeTool.marqueeStart = value; }
+        });
+        Object.defineProperty(this, 'marqueeMultiSelect', {
+            get: function() { return this.marqueeTool.marqueeMultiSelect; },
+            set: function(value) { this.marqueeTool.marqueeMultiSelect = value; }
+        });
+        Object.defineProperty(this, 'justCompletedMarqueeSelection', {
+            get: function() { return this.marqueeTool.justCompletedMarqueeSelection; },
+            set: function(value) { this.marqueeTool.justCompletedMarqueeSelection = value; }
+        });
         
         this.init();
     }
@@ -122,7 +143,7 @@ class SVGEditor {
         });
         
         document.getElementById('marqueeSelectTool').addEventListener('click', () => {
-            this.toggleMarqueeMode();
+            this.marqueeTool.toggleMode();
         });
         
         // Setup tooltips
@@ -642,7 +663,7 @@ class SVGEditor {
         // Update UI - but preserve marquee button state if marquee mode is enabled
         document.querySelectorAll('.tool-palette-btn').forEach(btn => {
             // Don't remove active class from marquee button if marquee mode is enabled
-            if (btn.id === 'marqueeSelectTool' && this.marqueeModeEnabled) {
+            if (btn.id === 'marqueeSelectTool' && this.marqueeTool.marqueeModeEnabled) {
                 return;
             }
             btn.classList.remove('active');
@@ -650,7 +671,7 @@ class SVGEditor {
         document.querySelector(`[data-tool="${tool}"]`).classList.add('active');
         
         // Ensure marquee button shows active state if marquee mode is enabled
-        if (this.marqueeModeEnabled) {
+        if (this.marqueeTool.marqueeModeEnabled) {
             const marqueeBtn = document.getElementById('marqueeSelectTool');
             if (marqueeBtn) {
                 marqueeBtn.classList.add('active');
@@ -674,28 +695,13 @@ class SVGEditor {
         }
         
         // Clear marquee selection when switching tools (but keep marquee mode enabled if it was)
-        if (this.isMarqueeSelecting) {
-            this.endMarqueeSelection();
+        if (this.marqueeTool.isMarqueeSelecting) {
+            this.marqueeTool.endSelection();
         }
     }
     
     toggleMarqueeMode() {
-        this.marqueeModeEnabled = !this.marqueeModeEnabled;
-        
-        // Update UI
-        const marqueeBtn = document.getElementById('marqueeSelectTool');
-        if (marqueeBtn) {
-            if (this.marqueeModeEnabled) {
-                marqueeBtn.classList.add('active');
-            } else {
-                marqueeBtn.classList.remove('active');
-            }
-        }
-        
-        // Clear any active marquee selection when toggling
-        if (this.isMarqueeSelecting) {
-            this.endMarqueeSelection();
-        }
+        this.marqueeTool.toggleMode();
     }
     
     async loadSVG(file) {
@@ -904,13 +910,9 @@ class SVGEditor {
             }
             
             // Handle marquee mode (works with select or direct-select tools)
-            if (this.marqueeModeEnabled && (this.currentTool === 'select' || this.currentTool === 'direct-select')) {
+            if (this.marqueeTool.isEnabled() && (this.currentTool === 'select' || this.currentTool === 'direct-select')) {
                 // Check if clicking on an element or on the canvas
-                if (target && target !== this.svgElement && 
-                    (target.tagName === 'path' || target.tagName === 'circle' || 
-                     target.tagName === 'rect' || target.tagName === 'ellipse' || 
-                     target.tagName === 'line' || target.tagName === 'polyline' || 
-                     target.tagName === 'polygon')) {
+                if (!this.marqueeTool.canStartOnElement(target)) {
                     // Clicked on an element - don't start marquee selection
                     e.stopPropagation();
                     return;
@@ -918,7 +920,7 @@ class SVGEditor {
                 
                 // Clicked on canvas - start marquee selection
                 e.stopPropagation();
-                this.startMarqueeSelection(e);
+                this.marqueeTool.startSelection(e);
                 return;
             }
             
@@ -1027,8 +1029,11 @@ class SVGEditor {
                 return; // Tool handled the event
             }
         } else if (this.currentTool === 'direct-select') {
-            // Don't select yet - wait for mouseup
-            // Direct select doesn't drag, so no drag setup needed
+            // Direct select doesn't drag elements, only nodes
+            // Node dragging is handled in node-selection.js
+            if (this.directSelectTool.onMouseDown(e, element)) {
+                return; // Tool handled the event
+            }
         }
     }
     
@@ -1047,8 +1052,8 @@ class SVGEditor {
         }
         
         // Handle marquee selection
-        if (this.isMarqueeSelecting) {
-            this.updateMarqueeSelection(e);
+        if (this.marqueeTool.isMarqueeSelecting) {
+            this.marqueeTool.updateSelection(e);
             return;
         }
         
@@ -1062,78 +1067,20 @@ class SVGEditor {
             if (this.selectTool.onMouseMove(e)) {
                 return; // Tool handled the event
             }
-        } else if (this.currentTool === 'direct-select' && this.isDragging && this.currentDraggedNode) {
-            // Check if we've moved enough to consider it a drag
-            const moveThreshold = 3;
-            const movedX = Math.abs(e.clientX - this.dragStartPos.x);
-            const movedY = Math.abs(e.clientY - this.dragStartPos.y);
-            
-            if (movedX > moveThreshold || movedY > moveThreshold) {
-                this.wasDragging = true;
+        } else if (this.currentTool === 'direct-select') {
+            if (this.directSelectTool.onMouseMove(e)) {
+                return; // Tool handled the event
             }
-            
-            const rect = this.svgElement.getBoundingClientRect();
-            const point = this.svgElement.createSVGPoint();
-            point.x = e.clientX;
-            point.y = e.clientY;
-            
-            // Convert screen coordinates to SVG coordinates
-            const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
-            
-            // Get the nodeId for the current dragged node
-            const elementId = this.currentDraggedNode.element.id || '';
-            const index = this.currentDraggedNode.index;
-            const pointType = this.currentDraggedNode.controlPoint === 1 ? 'control1' : 
-                             this.currentDraggedNode.controlPoint === 2 ? 'control2' : 'main';
-            const currentNodeId = `${elementId}-${index}-${pointType}`;
-            
-            // Get initial position of the current dragged node
-            const currentInitialData = this.selectedNodesInitialPositions.get(currentNodeId);
-            if (!currentInitialData) {
-                // Fallback: just move the current node if we don't have initial position
-                this.moveNode(this.currentDraggedNode.element, 
-                    this.currentDraggedNode.index, 
-                    svgPoint.x, 
-                    svgPoint.y);
-            } else {
-                // Calculate delta from initial position
-                const deltaX = svgPoint.x - currentInitialData.pos.x;
-                const deltaY = svgPoint.y - currentInitialData.pos.y;
-                
-                // Move all selected nodes by the same delta
-                this.selectedNodes.forEach(nodeId => {
-                    const nodeData = this.selectedNodesInitialPositions.get(nodeId);
-                    if (!nodeData || !nodeData.nodeInfo) return;
-                    
-                    const { nodeInfo, pos } = nodeData;
-                    
-                    // Calculate new position
-                    const newX = pos.x + deltaX;
-                    const newY = pos.y + deltaY;
-                    
-                    // Move this node
-                    if (nodeInfo.element.tagName === 'path') {
-                        this.moveNode(nodeInfo.element, nodeInfo.index, newX, newY, nodeInfo.pointType);
-                    } else {
-                        // For non-path elements, we need to handle corner movement differently
-                        // This would require moving the entire element, which is more complex
-                        // For now, skip non-path elements in multi-node drag
-                    }
-                });
-            }
-            
-            // Update transform panel during node dragging (shape may change)
-            this.updateTransformPanel();
         }
     }
     
     handleMouseUp(e) {
         // Handle marquee selection end FIRST (before other handlers that might interfere)
-        if (this.isMarqueeSelecting) {
-            this.endMarqueeSelection();
+        if (this.marqueeTool.isMarqueeSelecting) {
+            this.marqueeTool.endSelection();
             // Clear the flag after click event would have fired (click fires after mouseup)
             setTimeout(() => {
-                this.justCompletedMarqueeSelection = false;
+                this.marqueeTool.justCompletedMarqueeSelection = false;
             }, 10);
             return; // Don't process other mouseup handlers when marquee selecting
         }
@@ -1145,7 +1092,7 @@ class SVGEditor {
                 this.renderLayersPanel();
                 
                 if (this.currentTool === 'direct-select') {
-                    this.showNodeHandles(this.pendingSelectionElement);
+                    this.directSelectTool.onElementSelected(this.pendingSelectionElement);
                 }
             }
         }
@@ -1190,122 +1137,15 @@ class SVGEditor {
     }
     
     startMarqueeSelection(e) {
-        if (!this.svgElement) return;
-        
-        // Convert mouse position to SVG coordinates
-        const point = this.svgElement.createSVGPoint();
-        point.x = e.clientX;
-        point.y = e.clientY;
-        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
-        
-        // Store starting position and modifier key state
-        this.marqueeStart = { x: svgPoint.x, y: svgPoint.y };
-        this.marqueeMultiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
-        this.isMarqueeSelecting = true;
-        
-        // Create or get marquee group (similar to bounding box group)
-        let marqueeGroup = this.svgElement.querySelector('#marqueeSelectGroup');
-        if (!marqueeGroup) {
-            marqueeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            marqueeGroup.id = 'marqueeSelectGroup';
-            marqueeGroup.style.pointerEvents = 'none';
-            this.svgElement.appendChild(marqueeGroup);
-        } else {
-            // Clear existing contents
-            marqueeGroup.innerHTML = '';
-        }
-        
-        // Create the rectangle element
-        this.marqueeRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        this.marqueeRect.setAttribute('stroke', '#0078d4');
-        this.marqueeRect.setAttribute('stroke-width', '1');
-        this.marqueeRect.setAttribute('stroke-dasharray', '4,4');
-        this.marqueeRect.setAttribute('fill', 'none');
-        this.marqueeRect.setAttribute('x', svgPoint.x);
-        this.marqueeRect.setAttribute('y', svgPoint.y);
-        this.marqueeRect.setAttribute('width', '0');
-        this.marqueeRect.setAttribute('height', '0');
-        
-        marqueeGroup.appendChild(this.marqueeRect);
-        
-        // Apply inverse scale transform to maintain constant screen size
-        this.updateTemporaryUIElementTransforms();
+        this.marqueeTool.startSelection(e);
     }
     
     updateMarqueeSelection(e) {
-        if (!this.svgElement || !this.marqueeRect) return;
-        
-        // Convert current mouse position to SVG coordinates
-        const point = this.svgElement.createSVGPoint();
-        point.x = e.clientX;
-        point.y = e.clientY;
-        const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
-        
-        // Calculate rectangle dimensions (can go in any direction)
-        const x = Math.min(this.marqueeStart.x, svgPoint.x);
-        const y = Math.min(this.marqueeStart.y, svgPoint.y);
-        const width = Math.abs(svgPoint.x - this.marqueeStart.x);
-        const height = Math.abs(svgPoint.y - this.marqueeStart.y);
-        
-        // Update rectangle attributes
-        this.marqueeRect.setAttribute('x', x);
-        this.marqueeRect.setAttribute('y', y);
-        this.marqueeRect.setAttribute('width', width);
-        this.marqueeRect.setAttribute('height', height);
-        
-        // Update transform to maintain constant screen size
-        this.updateTemporaryUIElementTransforms();
+        this.marqueeTool.updateSelection(e);
     }
     
     endMarqueeSelection() {
-        if (!this.isMarqueeSelecting) return;
-        
-        // Get the final marquee rectangle bounds before removing it
-        // Check if marqueeRect still exists and is in the DOM
-        if (!this.marqueeRect || !this.marqueeRect.parentNode) {
-            // Rectangle was already removed, just reset state
-            this.isMarqueeSelecting = false;
-            this.marqueeRect = null;
-            this.marqueeStart = { x: 0, y: 0 };
-            this.marqueeMultiSelect = false;
-            return;
-        }
-        
-        // Get the final marquee rectangle bounds (already in SVG root coordinates)
-        const marqueeX = parseFloat(this.marqueeRect.getAttribute('x'));
-        const marqueeY = parseFloat(this.marqueeRect.getAttribute('y'));
-        const marqueeWidth = parseFloat(this.marqueeRect.getAttribute('width'));
-        const marqueeHeight = parseFloat(this.marqueeRect.getAttribute('height'));
-        
-        // Only select if the marquee rectangle has a valid size
-        if (marqueeWidth > 0 && marqueeHeight > 0) {
-            // Determine drag direction: left-to-right if end x > start x, right-to-left otherwise
-            const isLeftToRight = marqueeX >= this.marqueeStart.x;
-            
-            if (this.currentTool === 'direct-select') {
-                // Direct-select mode: select nodes from currently selected paths
-                this.selectNodesInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight);
-            } else {
-                // Select mode: select paths/elements
-                // Pass drag direction: true for left-to-right (containment), false for right-to-left (intersection)
-                this.selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight, isLeftToRight);
-            }
-        }
-        
-        // Remove the marquee rectangle
-        const marqueeGroup = this.svgElement.querySelector('#marqueeSelectGroup');
-        if (marqueeGroup) {
-            marqueeGroup.remove();
-        }
-        
-        // Set flag to prevent click handler from interfering (must be set before resetting isMarqueeSelecting)
-        this.justCompletedMarqueeSelection = true;
-        
-        // Reset state
-        this.isMarqueeSelecting = false;
-        this.marqueeRect = null;
-        this.marqueeStart = { x: 0, y: 0 };
-        this.marqueeMultiSelect = false;
+        this.marqueeTool.endSelection();
     }
     
     selectElementsInMarquee(marqueeX, marqueeY, marqueeWidth, marqueeHeight, isLeftToRight = true) {
@@ -1434,17 +1274,17 @@ class SVGEditor {
         
         // Update marquee selection stroke-width (but not the group transform)
         const marqueeGroup = this.svgElement ? this.svgElement.querySelector('#marqueeSelectGroup') : null;
-        if (marqueeGroup && this.marqueeRect) {
+        if (marqueeGroup && this.marqueeTool.marqueeRect) {
             // Remove any group transform
             marqueeGroup.removeAttribute('transform');
             
             // Update stroke-width of marquee rectangle
             const baseStrokeWidth = 1;
-            this.marqueeRect.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
+            this.marqueeTool.marqueeRect.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
             // Also scale the dash array
             const baseDashArray = '4,4';
             const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
-            this.marqueeRect.setAttribute('stroke-dasharray', dashValues.join(','));
+            this.marqueeTool.marqueeRect.setAttribute('stroke-dasharray', dashValues.join(','));
         }
     }
     
