@@ -4,6 +4,7 @@ class SVGEditor {
         // Initialize selection managers
         this.selectionManager = new ElementSelectionManager(this);
         this.nodeSelectionManager = new NodeSelectionManager(this);
+        this.boundingBoxManager = new BoundingBoxManager(this);
         // Keep selectedElements as a getter for backward compatibility
         Object.defineProperty(this, 'selectedElements', {
             get: function() { return this.selectionManager.selectedElements; }
@@ -53,16 +54,22 @@ class SVGEditor {
         this.panStart = { x: 0, y: 0 };
         this.panStartOffset = { x: 0, y: 0 };
         
-        // Bounding box and transform handles
-        this.boundingBoxOverlay = null;
-        this.boundingBox = null;
-        this.isTransforming = false;
-        this.transformHandle = null;
-        this.transformStart = { x: 0, y: 0 };
-        this.transformStartBBox = null;
-        this.transformStartStates = new Map();
-        this.transformStartCenters = new Map(); // Store center in element-local coords
-        this.transformStartElementData = new Map(); // Store original element data for scaling
+        // Bounding box and transform handles (moved to boundingBoxManager)
+        // Keep as getters for backward compatibility
+        Object.defineProperty(this, 'boundingBoxOverlay', {
+            get: function() { return this.boundingBoxManager.boundingBoxOverlay; }
+        });
+        Object.defineProperty(this, 'boundingBox', {
+            get: function() { return this.boundingBoxManager.boundingBox; }
+        });
+        Object.defineProperty(this, 'isTransforming', {
+            get: function() { return this.boundingBoxManager.isTransforming; },
+            set: function(value) { this.boundingBoxManager.isTransforming = value; }
+        });
+        Object.defineProperty(this, 'transformHandle', {
+            get: function() { return this.boundingBoxManager.transformHandle; },
+            set: function(value) { this.boundingBoxManager.transformHandle = value; }
+        });
         this.isUpdatingScaleInput = false; // Flag to prevent recursive updates
         
         // Marquee selection state
@@ -733,7 +740,7 @@ class SVGEditor {
         if (oldBBoxGroup) {
             oldBBoxGroup.remove();
         }
-        this.createBoundingBoxOverlay();
+        this.boundingBoxManager.create();
     }
     
     extractLayers() {
@@ -1085,8 +1092,8 @@ class SVGEditor {
         }
         
         // Handle bounding box transforms (scale/rotate)
-        if (this.isTransforming && this.currentTool === 'select') {
-            this.handleBoundingBoxTransform(e);
+        if (this.boundingBoxManager.isTransforming && this.currentTool === 'select') {
+            this.boundingBoxManager.handleTransform(e);
             return;
         }
         
@@ -1241,9 +1248,8 @@ class SVGEditor {
         }
         
         // Handle transform end
-        if (this.isTransforming) {
-            this.isTransforming = false;
-            this.transformHandle = null;
+        if (this.boundingBoxManager.isTransforming) {
+            this.boundingBoxManager.endTransform();
         }
     }
     
@@ -1487,47 +1493,8 @@ class SVGEditor {
         // Update node handles
         this.updateNodeHandleTransforms();
         
-        // Update bounding box stroke-width and handles (but not the group transform)
-        if (this.boundingBoxOverlay) {
-            // Remove any group transform
-            this.boundingBoxOverlay.removeAttribute('transform');
-            
-            // Update stroke-width of bounding box rectangle
-            const bboxRect = this.boundingBoxOverlay.querySelector('.bounding-box');
-            if (bboxRect) {
-                const baseStrokeWidth = 2;
-                bboxRect.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
-                // Also scale the dash array
-                const baseDashArray = '5,5';
-                const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
-                bboxRect.setAttribute('stroke-dasharray', dashValues.join(','));
-            }
-            
-            // Update bounding box handles (resize handles and rotation handle)
-            const handles = this.boundingBoxOverlay.querySelectorAll('.bbox-handle, .bbox-rotation-handle');
-            handles.forEach(handle => {
-                const cx = parseFloat(handle.getAttribute('cx')) || 0;
-                const cy = parseFloat(handle.getAttribute('cy')) || 0;
-                // Keep radius at base value (transform will scale it)
-                const baseR = 6;
-                const baseStrokeWidth = 2;
-                handle.setAttribute('r', baseR);
-                handle.setAttribute('stroke-width', baseStrokeWidth);
-                // Apply transform to keep handle at constant screen size
-                handle.setAttribute('transform', `translate(${cx}, ${cy}) scale(${inverseScale}) translate(${-cx}, ${-cy})`);
-            });
-            
-            // Update rotation line stroke-width
-            const rotationLine = this.boundingBoxOverlay.querySelector('line');
-            if (rotationLine) {
-                const baseStrokeWidth = 1;
-                rotationLine.setAttribute('stroke-width', baseStrokeWidth * inverseScale);
-                // Also scale the dash array
-                const baseDashArray = '3,3';
-                const dashValues = baseDashArray.split(',').map(v => parseFloat(v.trim()) * inverseScale);
-                rotationLine.setAttribute('stroke-dasharray', dashValues.join(','));
-            }
-        }
+        // Update bounding box stroke-width and handles
+        this.boundingBoxManager.updateTransforms();
         
         // Update marquee selection stroke-width (but not the group transform)
         const marqueeGroup = this.svgElement ? this.svgElement.querySelector('#marqueeSelectGroup') : null;
@@ -3331,22 +3298,14 @@ class SVGEditor {
     }
     
     createBoundingBoxOverlay() {
-        if (!this.svgElement) return;
-        
-        // Create a group inside the SVG for the bounding box
-        // This ensures it's positioned correctly and doesn't block other elements
-        const bboxGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        bboxGroup.id = 'boundingBoxGroup';
-        bboxGroup.setAttribute('class', 'bounding-box-group');
-        bboxGroup.style.pointerEvents = 'none';
-        
-        // Append to SVG (at the end so it's on top)
-        this.svgElement.appendChild(bboxGroup);
-        
-        this.boundingBoxOverlay = bboxGroup;
+        this.boundingBoxManager.create();
+    }
+
+    updateBoundingBox() {
+        this.boundingBoxManager.update();
     }
     
-    updateBoundingBox() {
+    _updateBoundingBox_OLD() {
         if (!this.boundingBoxOverlay || !this.svgElement) return;
         
         // Clear existing bounding box
@@ -3490,6 +3449,10 @@ class SVGEditor {
     }
     
     handleBoundingBoxHandleDown(e, handleType) {
+        this.boundingBoxManager.handleHandleDown(e, handleType);
+    }
+    
+    _handleBoundingBoxHandleDown_OLD(e, handleType) {
         if (this.currentTool !== 'select' || this.selectedElements.size === 0) return;
         
         e.stopPropagation();
@@ -3558,6 +3521,10 @@ class SVGEditor {
     }
     
     handleBoundingBoxTransform(e) {
+        this.boundingBoxManager.handleTransform(e);
+    }
+    
+    _handleBoundingBoxTransform_OLD(e) {
         if (!this.isTransforming || !this.transformHandle || !this.boundingBox) return;
         
         // Convert mouse position to SVG root coordinates
