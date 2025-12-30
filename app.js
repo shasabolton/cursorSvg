@@ -5,6 +5,9 @@ class SVGEditor {
         this.selectionManager = new ElementSelectionManager(this);
         this.nodeSelectionManager = new NodeSelectionManager(this);
         this.boundingBoxManager = new BoundingBoxManager(this);
+        
+        // Initialize tools
+        this.selectTool = new SelectTool(this);
         // Keep selectedElements as a getter for backward compatibility
         Object.defineProperty(this, 'selectedElements', {
             get: function() { return this.selectionManager.selectedElements; }
@@ -1020,51 +1023,9 @@ class SVGEditor {
         this.pendingSelectionMultiSelect = isMultiSelect;
         
         if (this.currentTool === 'select') {
-            // Only allow dragging if the element is already selected
-            if (!this.selectedElements.has(element)) {
-                // Element is not selected, don't allow dragging
-                return;
+            if (this.selectTool.onMouseDown(e, element)) {
+                return; // Tool handled the event
             }
-            
-            // Don't select yet - wait for mouseup
-            // But prepare for dragging
-            this.isDragging = true;
-            this.currentDraggedElement = element;
-            
-            // Convert initial mouse position to SVG coordinates
-            const point = this.svgElement.createSVGPoint();
-            point.x = e.clientX;
-            point.y = e.clientY;
-            const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
-            
-            // Store initial click position in SVG coordinates
-            this.dragStart = {
-                x: svgPoint.x,
-                y: svgPoint.y
-            };
-            
-            // Store initial transforms of all selected elements
-            this.selectedElementsInitialTransforms.clear();
-            if (this.selectedElements.size > 1) {
-                // Store transforms for all selected elements
-                this.selectedElements.forEach(selectedEl => {
-                    const transform = this.getElementTransform(selectedEl);
-                    this.selectedElementsInitialTransforms.set(selectedEl, transform);
-                });
-            } else {
-                // Store transform for just the dragged element (only one selected)
-                const transform = this.getElementTransform(element);
-                this.selectedElementsInitialTransforms.set(element, transform);
-            }
-            
-            // Store initial element translate transform for the dragged element (for compatibility)
-            const draggedElementTransform = this.selectedElementsInitialTransforms.get(element);
-            this.dragOffset = {
-                x: draggedElementTransform.x,
-                y: draggedElementTransform.y
-            };
-            
-            element.classList.add('dragging');
         } else if (this.currentTool === 'direct-select') {
             // Don't select yet - wait for mouseup
             // Direct select doesn't drag, so no drag setup needed
@@ -1097,35 +1058,10 @@ class SVGEditor {
             return;
         }
         
-        if (this.currentTool === 'select' && this.isDragging && this.currentDraggedElement) {
-            // Check if we've moved enough to consider it a drag
-            const moveThreshold = 3;
-            const movedX = Math.abs(e.clientX - this.dragStartPos.x);
-            const movedY = Math.abs(e.clientY - this.dragStartPos.y);
-            
-            if (movedX > moveThreshold || movedY > moveThreshold) {
-                this.wasDragging = true;
+        if (this.currentTool === 'select') {
+            if (this.selectTool.onMouseMove(e)) {
+                return; // Tool handled the event
             }
-            
-            // Convert current mouse position to SVG coordinates
-            const point = this.svgElement.createSVGPoint();
-            point.x = e.clientX;
-            point.y = e.clientY;
-            const svgPoint = point.matrixTransform(this.svgElement.getScreenCTM().inverse());
-            
-            // Calculate delta from initial click position
-            const deltaX = svgPoint.x - this.dragStart.x;
-            const deltaY = svgPoint.y - this.dragStart.y;
-            
-            // Move all selected elements by the same delta
-            this.selectedElementsInitialTransforms.forEach((initialTransform, el) => {
-                this.moveElement(el, 
-                    initialTransform.x + deltaX, 
-                    initialTransform.y + deltaY);
-            });
-            
-            // Update bounding box during drag
-            this.updateBoundingBox();
         } else if (this.currentTool === 'direct-select' && this.isDragging && this.currentDraggedNode) {
             // Check if we've moved enough to consider it a drag
             const moveThreshold = 3;
