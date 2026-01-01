@@ -20,6 +20,7 @@ class PathTool {
         this.pendingPoint = null;
         this.lastControlPoint = null; // Track the last control point from previous curve segment
         this.lastSegmentWasCurve = false; // Track if the last segment was a curve
+        this.lastAddedWasCurve = false; // Track if the last added segment was a curve (for double-click handling)
     }
 
     onMouseDown(e, element) {
@@ -129,6 +130,7 @@ class PathTool {
             // It was a click (not a drag) - add straight line point
             if (this.pendingPoint) {
                 this.addPoint(this.pendingPoint);
+                this.lastAddedWasCurve = false;
                 this.pendingPoint = null;
             }
             this.updatePreview();
@@ -142,6 +144,30 @@ class PathTool {
 
     onDoubleClick(e) {
         if (this.isDrawing) {
+            // Remove the last point/segment that was just added by the click event
+            // Double-click fires both click and dblclick, so we need to undo the click's point addition
+            if (this.points.length > 1) {
+                // Remove the last point
+                const removedPoint = this.points.pop();
+                this.lastPoint = this.points[this.points.length - 1];
+                
+                // Remove the last command from path data
+                if (this.lastAddedWasCurve) {
+                    // Remove last C command (curve)
+                    this.pathData = this.pathData.replace(/\s+C\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+\s+[\d.-]+$/, '');
+                    // Reset curve tracking - we'd need to check previous segment to know for sure
+                    // For now, assume the previous segment was a straight line
+                    this.lastSegmentWasCurve = false;
+                    this.lastControlPoint = null;
+                } else {
+                    // Remove last L command (straight line)
+                    this.pathData = this.pathData.replace(/\s+L\s+[\d.-]+\s+[\d.-]+$/, '');
+                    this.lastSegmentWasCurve = false;
+                    this.lastControlPoint = null;
+                }
+                this.lastAddedWasCurve = false;
+            }
+            
             this.finishDrawing();
             return true;
         }
@@ -198,6 +224,7 @@ class PathTool {
         this.currentControlPoint = controlPoint2;
         this.lastControlPoint = controlPoint2; // Store for next segment
         this.lastSegmentWasCurve = true;
+        this.lastAddedWasCurve = true;
     }
 
     updateLastSegmentToCurve(controlPoint2) {
@@ -378,6 +405,7 @@ class PathTool {
         this.pendingPoint = null;
         this.lastControlPoint = null;
         this.lastSegmentWasCurve = false;
+        this.lastAddedWasCurve = false;
     }
 }
 
