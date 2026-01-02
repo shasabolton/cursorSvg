@@ -52,6 +52,9 @@ class SVGEditor {
         this.pendingSelectionNodeMultiSelect = false; // Track if pending node selection is multi-select
         this.lastValidStrokeWidth = 1; // Track last valid stroke width
         
+        // Load tangency constraint setting from localStorage or use default (true)
+        this.maintainTangency = localStorage.getItem('svgEditorMaintainTangency') !== 'false';
+        
         // Load DPI from localStorage or use default (96 DPI is standard)
         this.dpi = parseFloat(localStorage.getItem('svgEditorDPI')) || 96;
         this.transformUnit = localStorage.getItem('svgEditorTransformUnit') || 'px';
@@ -288,6 +291,16 @@ class SVGEditor {
                 this.applyOpacity(opacity);
             }
         });
+        
+        // Maintain Tangency checkbox
+        const maintainTangencyCheckbox = document.getElementById('maintainTangency');
+        if (maintainTangencyCheckbox) {
+            maintainTangencyCheckbox.checked = this.maintainTangency;
+            maintainTangencyCheckbox.addEventListener('change', (e) => {
+                this.maintainTangency = e.target.checked;
+                localStorage.setItem('svgEditorMaintainTangency', this.maintainTangency);
+            });
+        }
         
         // Log attributes button
         const logAttributesBtn = document.getElementById('logAttributesBtn');
@@ -2393,9 +2406,72 @@ class SVGEditor {
         if (controlPoint === 1) {
             cmd.x1 = local.x;
             cmd.y1 = local.y;
+            
+            // Maintain tangency: if this is a cubic (C) command and tangency is enabled,
+            // update the previous command's control2 to maintain smooth connection
+            if (this.maintainTangency && (cmd.type === 'C' || cmd.type === 'S')) {
+                if (commandIndex > 0) {
+                    const prevCmd = commands[commandIndex - 1];
+                    // Check if previous command is a curve that ends at the same point as this command starts
+                    if (prevCmd.type === 'C' || prevCmd.type === 'S') {
+                        // The anchor point is where the previous curve ends (prevCmd.x, prevCmd.y)
+                        // and where this curve starts. For tangency, we need to reflect control1
+                        // across the anchor point to get the new control2 for the previous command
+                        const anchorX = prevCmd.x;
+                        const anchorY = prevCmd.y;
+                        // Reflect: CP2_prev = 2*anchor - CP1_current
+                        prevCmd.x2 = 2 * anchorX - cmd.x1;
+                        prevCmd.y2 = 2 * anchorY - cmd.y1;
+                        // If previous was S, convert to C to preserve the explicit control2
+                        if (prevCmd.type === 'S') {
+                            prevCmd.type = 'C';
+                            // Calculate x1 for the previous command (it was auto-calculated before)
+                            if (commandIndex > 1) {
+                                const prevPrevCmd = commands[commandIndex - 2];
+                                if (prevPrevCmd.type === 'C' || prevPrevCmd.type === 'S') {
+                                    // Reflect previous previous command's control2
+                                    prevCmd.x1 = 2 * anchorX - prevPrevCmd.x2;
+                                    prevCmd.y1 = 2 * anchorY - prevPrevCmd.y2;
+                                } else {
+                                    // Use the previous previous command's endpoint
+                                    prevCmd.x1 = prevPrevCmd.x;
+                                    prevCmd.y1 = prevPrevCmd.y;
+                                }
+                            } else {
+                                // First command after M, use M point
+                                prevCmd.x1 = anchorX;
+                                prevCmd.y1 = anchorY;
+                            }
+                        }
+                    }
+                }
+            }
         } else if (controlPoint === 2) {
             cmd.x2 = local.x;
             cmd.y2 = local.y;
+            
+            // Maintain tangency: if this is a cubic (C) command and tangency is enabled,
+            // update the next command's control1 to maintain smooth connection
+            if (this.maintainTangency && (cmd.type === 'C' || cmd.type === 'S')) {
+                if (commandIndex < commands.length - 1) {
+                    const nextCmd = commands[commandIndex + 1];
+                    // Check if next command is a curve that starts at the same point as this command ends
+                    if (nextCmd.type === 'C' || nextCmd.type === 'S') {
+                        // The anchor point is where this curve ends (cmd.x, cmd.y)
+                        // and where the next curve starts. For tangency, we need to reflect control2
+                        // across the anchor point to get the new control1 for the next command
+                        const anchorX = cmd.x;
+                        const anchorY = cmd.y;
+                        // Reflect: CP1_next = 2*anchor - CP2_current
+                        nextCmd.x1 = 2 * anchorX - cmd.x2;
+                        nextCmd.y1 = 2 * anchorY - cmd.y2;
+                        // If next was S, convert to C to preserve the explicit control1
+                        if (nextCmd.type === 'S') {
+                            nextCmd.type = 'C';
+                        }
+                    }
+                }
+            }
         } else {
             cmd.x = local.x;
             cmd.y = local.y;
