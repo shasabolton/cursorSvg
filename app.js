@@ -2415,13 +2415,24 @@ class SVGEditor {
                     // Check if previous command is a curve that ends at the same point as this command starts
                     if (prevCmd.type === 'C' || prevCmd.type === 'S') {
                         // The anchor point is where the previous curve ends (prevCmd.x, prevCmd.y)
-                        // and where this curve starts. For tangency, we need to reflect control1
-                        // across the anchor point to get the new control2 for the previous command
                         const anchorX = prevCmd.x;
                         const anchorY = prevCmd.y;
-                        // Reflect: CP2_prev = 2*anchor - CP1_current
-                        prevCmd.x2 = 2 * anchorX - cmd.x1;
-                        prevCmd.y2 = 2 * anchorY - cmd.y1;
+                        
+                        // Calculate the angle/direction from anchor to the moved control1
+                        const dx = cmd.x1 - anchorX;
+                        const dy = cmd.y1 - anchorY;
+                        const angle = Math.atan2(dy, dx);
+                        
+                        // Get the original distance of control2 from the anchor point
+                        const originalDx = prevCmd.x2 - anchorX;
+                        const originalDy = prevCmd.y2 - anchorY;
+                        const originalDistance = Math.sqrt(originalDx * originalDx + originalDy * originalDy);
+                        
+                        // Apply the same angle but keep the original distance
+                        // Use opposite direction (add 180 degrees / π radians) for tangency
+                        prevCmd.x2 = anchorX - Math.cos(angle) * originalDistance;
+                        prevCmd.y2 = anchorY - Math.sin(angle) * originalDistance;
+                        
                         // If previous was S, convert to C to preserve the explicit control2
                         if (prevCmd.type === 'S') {
                             prevCmd.type = 'C';
@@ -2429,9 +2440,16 @@ class SVGEditor {
                             if (commandIndex > 1) {
                                 const prevPrevCmd = commands[commandIndex - 2];
                                 if (prevPrevCmd.type === 'C' || prevPrevCmd.type === 'S') {
-                                    // Reflect previous previous command's control2
-                                    prevCmd.x1 = 2 * anchorX - prevPrevCmd.x2;
-                                    prevCmd.y1 = 2 * anchorY - prevPrevCmd.y2;
+                                    // Calculate angle from prevPrevCmd's endpoint to its control2
+                                    const prevAnchorX = prevPrevCmd.x;
+                                    const prevAnchorY = prevPrevCmd.y;
+                                    const prevDx = prevPrevCmd.x2 - prevAnchorX;
+                                    const prevDy = prevPrevCmd.y2 - prevAnchorY;
+                                    const prevAngle = Math.atan2(prevDy, prevDx);
+                                    const prevDistance = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+                                    // Apply opposite direction
+                                    prevCmd.x1 = prevAnchorX - Math.cos(prevAngle) * prevDistance;
+                                    prevCmd.y1 = prevAnchorY - Math.sin(prevAngle) * prevDistance;
                                 } else {
                                     // Use the previous previous command's endpoint
                                     prevCmd.x1 = prevPrevCmd.x;
@@ -2458,13 +2476,24 @@ class SVGEditor {
                     // Check if next command is a curve that starts at the same point as this command ends
                     if (nextCmd.type === 'C' || nextCmd.type === 'S') {
                         // The anchor point is where this curve ends (cmd.x, cmd.y)
-                        // and where the next curve starts. For tangency, we need to reflect control2
-                        // across the anchor point to get the new control1 for the next command
                         const anchorX = cmd.x;
                         const anchorY = cmd.y;
-                        // Reflect: CP1_next = 2*anchor - CP2_current
-                        nextCmd.x1 = 2 * anchorX - cmd.x2;
-                        nextCmd.y1 = 2 * anchorY - cmd.y2;
+                        
+                        // Calculate the angle/direction from anchor to the moved control2
+                        const dx = cmd.x2 - anchorX;
+                        const dy = cmd.y2 - anchorY;
+                        const angle = Math.atan2(dy, dx);
+                        
+                        // Get the original distance of control1 from the anchor point
+                        const originalDx = nextCmd.x1 - anchorX;
+                        const originalDy = nextCmd.y1 - anchorY;
+                        const originalDistance = Math.sqrt(originalDx * originalDx + originalDy * originalDy);
+                        
+                        // Apply the same angle but keep the original distance
+                        // Use opposite direction (add 180 degrees / π radians) for tangency
+                        nextCmd.x1 = anchorX - Math.cos(angle) * originalDistance;
+                        nextCmd.y1 = anchorY - Math.sin(angle) * originalDistance;
+                        
                         // If next was S, convert to C to preserve the explicit control1
                         if (nextCmd.type === 'S') {
                             nextCmd.type = 'C';
