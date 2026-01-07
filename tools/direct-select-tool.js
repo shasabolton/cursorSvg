@@ -134,6 +134,9 @@ class DirectSelectTool {
      * @param {number} deltaY - Delta Y in root SVG coordinates
      */
     moveAdjacentBezierHandles(element, commandIndex, deltaX, deltaY) {
+        var originalMaintainTangency = this.editor.maintainTangency;
+        this.editor.maintainTangency = false;
+        console.log("tangency: ",this.editor.maintainTangency);
         if (element.tagName !== 'path') return;
         
         const pathData = element.getAttribute('d');
@@ -192,6 +195,7 @@ class DirectSelectTool {
                 }
             }
         }
+        this.editor.maintainTangency = originalMaintainTangency;
     }
 }
 
