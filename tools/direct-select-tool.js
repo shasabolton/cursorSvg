@@ -136,7 +136,6 @@ class DirectSelectTool {
     moveAdjacentBezierHandles(element, commandIndex, deltaX, deltaY) {
         var originalMaintainTangency = this.editor.maintainTangency;
         this.editor.maintainTangency = false;
-        console.log("tangency: ",this.editor.maintainTangency);
         if (element.tagName !== 'path') return;
         
         const pathData = element.getAttribute('d');
