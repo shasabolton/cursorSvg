@@ -296,9 +296,16 @@ class SVGEditor {
         const maintainTangencyCheckbox = document.getElementById('maintainTangency');
         if (maintainTangencyCheckbox) {
             maintainTangencyCheckbox.checked = this.maintainTangency;
+            const previousMaintainTangency = this.maintainTangency;
             maintainTangencyCheckbox.addEventListener('change', (e) => {
+                const wasFalse = !this.maintainTangency;
                 this.maintainTangency = e.target.checked;
                 localStorage.setItem('svgEditorMaintainTangency', this.maintainTangency);
+                
+                // When changing from false to true, make selected nodes smooth
+                if (wasFalse && this.maintainTangency) {
+                    this.makeSelectedNodesSmooth();
+                }
             });
         }
         
@@ -2512,6 +2519,174 @@ class SVGEditor {
         
         // Update handles
         this.showNodeHandles(element);
+    }
+    
+    /**
+     * Make all currently selected main nodes smooth by converting them to bezier curves
+     * and making the next node's control1 tangent to the current node's control2
+     */
+    makeSelectedNodesSmooth() {
+        if (!this.selectedNodes || this.selectedNodes.size === 0) return;
+        
+        // Group nodes by element to process them together
+        const nodesByElement = new Map();
+        
+        this.selectedNodes.forEach(nodeId => {
+            const nodeInfo = this.parseNodeId(nodeId);
+            if (!nodeInfo || !nodeInfo.element || nodeInfo.element.tagName !== 'path') return;
+            if (nodeInfo.pointType !== 'main') return; // Only process main nodes
+            
+            const element = nodeInfo.element;
+            if (!nodesByElement.has(element)) {
+                nodesByElement.set(element, []);
+            }
+            nodesByElement.get(element).push(nodeInfo.index);
+        });
+        
+        // Process each element
+        nodesByElement.forEach((indices, element) => {
+            const pathData = element.getAttribute('d');
+            if (!pathData) return;
+            
+            const commands = this.parsePathData(pathData);
+            let pathModified = false;
+            
+            // Sort indices to process in order
+            indices.sort((a, b) => a - b);
+            
+            indices.forEach(commandIndex => {
+                if (commandIndex >= commands.length) return;
+                
+                const cmd = commands[commandIndex];
+                
+                // Skip M and Z commands - they don't have control points to make smooth
+                if (cmd.type === 'M' || cmd.type === 'Z') return;
+                
+                // Convert current command to C if it's not already
+                if (cmd.type !== 'C') {
+                    this.convertCommandToBezier(cmd, commandIndex, commands);
+                    pathModified = true;
+                }
+                
+                // Make the next command's control1 tangent to this command's control2
+                if (commandIndex < commands.length - 1) {
+                    const nextCmd = commands[commandIndex + 1];
+                    
+                    // Skip if next command is M or Z
+                    if (nextCmd.type === 'M' || nextCmd.type === 'Z') return;
+                    
+                    // Convert next command to C if it's not already
+                    if (nextCmd.type !== 'C') {
+                        this.convertCommandToBezier(nextCmd, commandIndex + 1, commands);
+                        pathModified = true;
+                    }
+                    
+                    // Make control1 of next command tangent to control2 of current command
+                    this.makeControlPointsTangent(cmd, nextCmd);
+                    pathModified = true;
+                }
+            });
+            
+            if (pathModified) {
+                // Rebuild path data
+                const newPathData = this.buildPathData(commands);
+                element.setAttribute('d', newPathData);
+                
+                // Update handles
+                this.showNodeHandles(element);
+            }
+        });
+        
+        // Save history state
+        this.historyManager.saveState('Make nodes smooth');
+    }
+    
+    /**
+     * Convert a path command to a cubic bezier (C) command
+     * @param {Object} cmd - The command to convert
+     * @param {number} commandIndex - The index of the command
+     * @param {Array} commands - All commands in the path
+     */
+    convertCommandToBezier(cmd, commandIndex, commands) {
+        if (cmd.type === 'C') return; // Already a bezier
+        
+        // Get the start point (endpoint of previous command or M command)
+        let startX, startY;
+        
+        // Find the start point by looking backwards for the previous drawing command or M
+        for (let i = commandIndex - 1; i >= 0; i--) {
+            const prevCmd = commands[i];
+            if (prevCmd.type === 'M') {
+                startX = prevCmd.x;
+                startY = prevCmd.y;
+                break;
+            } else if (prevCmd.type === 'L' || prevCmd.type === 'C' || prevCmd.type === 'Q') {
+                startX = prevCmd.x;
+                startY = prevCmd.y;
+                break;
+            }
+        }
+        
+        // Fallback if no start point found
+        if (startX === undefined || startY === undefined) {
+            startX = 0;
+            startY = 0;
+        }
+        
+        const endX = cmd.x;
+        const endY = cmd.y;
+        
+        if (cmd.type === 'L') {
+            // Convert line to bezier with control points on the line
+            cmd.type = 'C';
+            cmd.x1 = startX + (endX - startX) / 3;
+            cmd.y1 = startY + (endY - startY) / 3;
+            cmd.x2 = startX + 2 * (endX - startX) / 3;
+            cmd.y2 = startY + 2 * (endY - startY) / 3;
+            cmd.x = endX;
+            cmd.y = endY;
+        } else if (cmd.type === 'Q') {
+            // Convert quadratic to cubic bezier
+            cmd.type = 'C';
+            // Q uses one control point, C uses two
+            // Convert Q control point to C control points
+            const qx1 = cmd.x1;
+            const qy1 = cmd.y1;
+            cmd.x1 = startX + 2 * (qx1 - startX) / 3;
+            cmd.y1 = startY + 2 * (qy1 - startY) / 3;
+            cmd.x2 = endX + 2 * (qx1 - endX) / 3;
+            cmd.y2 = endY + 2 * (qy1 - endY) / 3;
+            cmd.x = endX;
+            cmd.y = endY;
+        }
+        // Add other conversions as needed (S, etc.)
+    }
+    
+    /**
+     * Make the control1 of nextCmd tangent to the control2 of cmd
+     * @param {Object} cmd - The current command
+     * @param {Object} nextCmd - The next command
+     */
+    makeControlPointsTangent(cmd, nextCmd) {
+        if (cmd.type !== 'C' || nextCmd.type !== 'C') return;
+        
+        // The anchor point is where cmd ends (cmd.x, cmd.y)
+        const anchorX = cmd.x;
+        const anchorY = cmd.y;
+        
+        // Calculate the direction from anchor to control2
+        const dx = cmd.x2 - anchorX;
+        const dy = cmd.y2 - anchorY;
+        const angle = Math.atan2(dy, dx);
+        
+        // Get the distance of control1 from the anchor point
+        const control1Dx = nextCmd.x1 - anchorX;
+        const control1Dy = nextCmd.y1 - anchorY;
+        const distance = Math.sqrt(control1Dx * control1Dx + control1Dy * control1Dy);
+        
+        // Apply the same angle but in opposite direction (180 degrees) for tangency
+        nextCmd.x1 = anchorX - Math.cos(angle) * distance;
+        nextCmd.y1 = anchorY - Math.sin(angle) * distance;
     }
     
     buildPathData(commands) {
