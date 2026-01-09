@@ -21,6 +21,8 @@ class PathTool {
         this.lastControlPoint = null; // Track the last control point from previous curve segment
         this.lastSegmentWasCurve = false; // Track if the last segment was a curve
         this.lastAddedWasCurve = false; // Track if the last added segment was a curve (for double-click handling)
+        this.startPoint = null; // Store the starting point for auto-close detection
+        this.closeThreshold = 10; // Screen pixel distance threshold for auto-close
     }
 
     onMouseDown(e, element) {
@@ -179,12 +181,23 @@ class PathTool {
         this.pathData = `M ${startPoint.x} ${startPoint.y}`;
         this.points = [startPoint];
         this.lastPoint = startPoint;
+        this.startPoint = startPoint; // Store starting point for auto-close detection
 
         // Create preview element
         this.createPreview();
     }
 
     addPoint(point) {
+        // Check if point is close to start point in screen pixels
+        if (this.startPoint && this.points.length > 0) {
+            if (this.isCloseToStart(point)) {
+                // Snap to start point and close the path
+                this.pathData += ` Z`;
+                this.finishDrawing();
+                return;
+            }
+        }
+        
         // Add a straight line point
         if (this.pathData === '') {
             this.pathData = `M ${point.x} ${point.y}`;
@@ -200,6 +213,28 @@ class PathTool {
     }
 
     addPointForCurve(endPoint, controlPoint2) {
+        // Check if endpoint is close to start point in screen pixels
+        if (this.startPoint && this.points.length > 0) {
+            if (this.isCloseToStart(endPoint)) {
+                // Snap to start point and close the path
+                // Need to calculate controlPoint1 first for the curve
+                let controlPoint1;
+                
+                if (this.lastSegmentWasCurve && this.lastControlPoint) {
+                    // Previous segment was a curve - mirror its last control point across the last point
+                    controlPoint1 = this.point180(this.lastPoint, this.lastControlPoint);
+                } else {
+                    // Previous segment was a straight line - use the last point as first control point
+                    controlPoint1 = { x: this.lastPoint.x, y: this.lastPoint.y };
+                }
+                
+                // Add cubic Bezier curve ending at start point, then close
+                this.pathData += ` C ${controlPoint1.x} ${controlPoint1.y} ${controlPoint2.x} ${controlPoint2.y} ${this.startPoint.x} ${this.startPoint.y} Z`;
+                this.finishDrawing();
+                return;
+            }
+        }
+        
         // Add a cubic Bezier curve: C x1 y1 x2 y2 x y
         // x1, y1: first control point (mirrored from previous segment's last control point)
         // x2, y2: second control point (controlPoint2 - the mirrored control point from current drag)
@@ -390,6 +425,30 @@ class PathTool {
         this.cancelDrawing();
     }
 
+    isCloseToStart(point) {
+        if (!this.startPoint) return false;
+        
+        // Convert both points to screen coordinates
+        const startScreen = this.svgPointToScreen(this.startPoint);
+        const pointScreen = this.svgPointToScreen(point);
+        
+        // Calculate distance in screen pixels
+        const dx = pointScreen.x - startScreen.x;
+        const dy = pointScreen.y - startScreen.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        return distance <= this.closeThreshold;
+    }
+    
+    svgPointToScreen(svgPoint) {
+        // Convert SVG point to screen coordinates
+        const point = this.editor.svgElement.createSVGPoint();
+        point.x = svgPoint.x;
+        point.y = svgPoint.y;
+        const screenPoint = point.matrixTransform(this.editor.svgElement.getScreenCTM());
+        return { x: screenPoint.x, y: screenPoint.y };
+    }
+
     cancelDrawing() {
         if (this.previewElement) {
             this.previewElement.remove();
@@ -406,6 +465,7 @@ class PathTool {
         this.lastControlPoint = null;
         this.lastSegmentWasCurve = false;
         this.lastAddedWasCurve = false;
+        this.startPoint = null;
     }
 }
 
